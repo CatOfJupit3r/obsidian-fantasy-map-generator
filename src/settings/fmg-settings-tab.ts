@@ -1,0 +1,53 @@
+import { PluginSettingTab, Setting } from 'obsidian';
+import type { App, Plugin } from 'obsidian';
+
+import { FMG_PIN } from '../fmg/fmg-pin';
+import { MAP_EXPORT_KIND_VALUES, readMapExportFormat } from '../map/map-export.constants';
+import type { MapExportKind } from '../map/map-export.constants';
+import { buildMapExportPath } from '../map/map-file-paths';
+import type { iPluginSettingsStore } from './plugin-settings';
+
+export class FmgSettingsTab extends PluginSettingTab {
+  public constructor(
+    app: App,
+    plugin: Plugin,
+    private readonly store: iPluginSettingsStore,
+  ) {
+    super(app, plugin);
+  }
+
+  public display() {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName('Maps folder')
+      .setDesc('Where "New map" creates .map files. Created when missing.')
+      .addText((text) =>
+        text
+          .setPlaceholder('Maps')
+          .setValue(this.store.read().mapsFolder)
+          .onChange(async (mapsFolder) => this.store.update({ mapsFolder })),
+      );
+
+    new Setting(containerEl).setName('Exports on save').setHeading();
+    for (const kind of MAP_EXPORT_KIND_VALUES) this.addExportToggle(containerEl, kind);
+
+    new Setting(containerEl)
+      .setName('Fantasy Map Generator version')
+      .setDesc(`${FMG_PIN.tag} (${FMG_PIN.commit.slice(0, 7)}), bundled with the plugin. MIT licence: LICENSE-FMG.`);
+  }
+
+  private addExportToggle(containerEl: HTMLElement, kind: MapExportKind) {
+    const format = readMapExportFormat(kind);
+    new Setting(containerEl)
+      .setName(format.label)
+      .setDesc(`${format.description} Written as ${buildMapExportPath('<map>.map', kind)}.`)
+      .addToggle((toggle) =>
+        toggle.setValue(this.store.read().exportKinds.includes(kind)).onChange(async (isEnabled) => {
+          const others = this.store.read().exportKinds.filter((enabled) => enabled !== kind);
+          return this.store.update({ exportKinds: isEnabled ? [...others, kind] : others });
+        }),
+      );
+  }
+}

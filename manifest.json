@@ -1,0 +1,9 @@
+{
+  "id": "azgaar-fantasy-map-generator",
+  "name": "Azgaar Fantasy Map Generator",
+  "version": "0.1.2",
+  "minAppVersion": "1.5.0",
+  "description": "Edit Azgaar Fantasy Map Generator maps inside Obsidian.",
+  "author": "CatOfJupit3r",
+  "isDesktopOnly": true
+}
