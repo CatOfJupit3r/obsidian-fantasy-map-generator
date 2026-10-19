@@ -82,6 +82,18 @@ export class FakeVault implements MapVault {
     return this.root;
   }
 
+  public getFiles(): TFile[] {
+    return [...this.entries.values()].filter((entry): entry is TFile => entry instanceof TFile);
+  }
+
+  /** Takes the file out of the vault, as moving it to the trash does. */
+  public removeFile(file: TFile) {
+    const folder = this.readParentFolder(this.requireFile(file).path);
+    if (folder) folder.children = folder.children.filter((child) => child !== file);
+    this.entries.delete(file.path);
+    this.contents.delete(file.path);
+  }
+
   public getMarkdownFiles(): TFile[] {
     return [...this.entries.values()].filter((entry): entry is TFile => entry instanceof TFile && entry.extension === 'md');
   }

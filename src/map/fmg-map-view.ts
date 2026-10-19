@@ -3,8 +3,7 @@ import type { TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 
 import type { iMapEntityRef } from '../entities/map-entity.types';
 import { mountFmg } from '../fmg/fmg-adapter';
-import type { FmgAdapter, iMountedFmg } from '../fmg/fmg-adapter';
-import type { iLinkedNotesReport } from '../links/linked-notes-refresher';
+import type { iMountedFmg } from '../fmg/fmg-adapter';
 import type { iMapBox } from '../map-data/map-geometry.types';
 import { showNotice } from '../show-notice';
 import { askMapConflict, MAP_CONFLICT_CHOICES } from './map-conflict.modal';
@@ -23,8 +22,6 @@ export interface iFmgMapViewHost {
   /** Whether the build put FMG next to the plugin. */
   hasFmgBundle: () => Promise<boolean>;
   readExportKinds: () => MapExportKind[];
-  /** Rewrites the facts blocks and thumbnails of the notes linked to the map, after a save. */
-  refreshLinkedNotes: (mapFile: TFile, editor: FmgAdapter) => Promise<iLinkedNotesReport>;
   /** Opens the note of the first of the clicked entities that has one. */
   openEntityNote: (mapPath: string, candidates: iMapEntityRef[]) => Promise<unknown>;
 }
@@ -37,12 +34,6 @@ function describeSave(report: iMapSaveReport): string {
   if (report.exportError) return `Saved ${report.mapPath}, but an export failed: ${report.exportError}`;
   const exports = report.exportPaths.length > 0 ? ` and ${report.exportPaths.length} export(s)` : '';
   return `Saved ${report.mapPath}${exports}.`;
-}
-
-function describeLinkedNotes(report: iLinkedNotesReport): string {
-  if (report.noteCount === 0 && report.failures.length === 0) return '';
-  const refreshed = ` Refreshed ${report.noteCount} linked note(s) and ${report.thumbnailCount} thumbnail(s).`;
-  return report.failures.length > 0 ? `${refreshed} Not refreshed: ${report.failures.join('; ')}` : refreshed;
 }
 
 /** Shows a vault `.map` file in the bundled FMG and writes FMG's map back on "Save map", Ctrl/Cmd+S or close. */
@@ -126,7 +117,7 @@ export class FmgMapView extends FileView {
     await this.runExclusively(async () => {
       const outcome = await session.save(file);
       if (outcome.kind === MAP_SAVE_OUTCOME_KIND_CASES.SAVED) {
-        await this.reportSave(file, outcome.report);
+        showNotice(describeSave(outcome.report));
         return;
       }
       await this.resolveConflict(session, file);
@@ -149,7 +140,7 @@ export class FmgMapView extends FileView {
       if (this.mounted !== mounted) return;
 
       this.session = session;
-      if (report) await this.reportSave(file, report);
+      if (report) showNotice(describeSave(report));
     } catch (error) {
       if (this.mounted === mounted) showNotice(`Could not open ${file.path}: ${describeError(error)}`);
     }
@@ -159,7 +150,7 @@ export class FmgMapView extends FileView {
     const choice = await askMapConflict(this.app, file.path);
     if (choice === MAP_CONFLICT_CHOICES.OVERWRITE) {
       const outcome = await session.save(file, { shouldOverwrite: true });
-      if (outcome.kind === MAP_SAVE_OUTCOME_KIND_CASES.SAVED) await this.reportSave(file, outcome.report);
+      if (outcome.kind === MAP_SAVE_OUTCOME_KIND_CASES.SAVED) showNotice(describeSave(outcome.report));
     } else if (choice === MAP_CONFLICT_CHOICES.RELOAD) {
       await session.open(file);
       showNotice(`Reloaded ${file.path}.`);
@@ -198,28 +189,12 @@ export class FmgMapView extends FileView {
     this.opening = null;
   }
 
-  /** After a save: refreshes the linked notes from the fresh exports, then says what was written. */
-  private async reportSave(file: TFile, report: iMapSaveReport, prefix = '') {
-    const { mounted } = this;
-    if (report.exportError || !mounted) {
-      showNotice(`${prefix}${describeSave(report)}`);
-      return;
-    }
-
-    try {
-      const linkedNotes = await this.host.refreshLinkedNotes(file, mounted.adapter);
-      showNotice(`${prefix}${describeSave(report)}${describeLinkedNotes(linkedNotes)}`);
-    } catch (error) {
-      showNotice(`${prefix}${describeSave(report)} The linked notes were not refreshed: ${describeError(error)}`);
-    }
-  }
-
   private async saveBeforeClosing(session: MapSession, file: TFile) {
     if (!(await session.hasUnsavedChanges())) return;
 
     const outcome = await session.save(file);
     if (outcome.kind === MAP_SAVE_OUTCOME_KIND_CASES.SAVED) {
-      await this.reportSave(file, outcome.report, 'Unsaved edits: ');
+      showNotice(`Unsaved edits: ${describeSave(outcome.report)}`);
       return;
     }
     const copyPath = await session.saveCopy(file);

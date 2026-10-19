@@ -221,22 +221,6 @@ export async function exportFmgMap(kind: MapExportKind): Promise<ArrayBuffer> {
   return blob.arrayBuffer();
 }
 
-/** Each region as a PNG through FMG's own region renderer, the one its PNG export uses. */
-export async function renderFmgRegions(regions: iFmgRegion[]): Promise<ArrayBuffer[]> {
-  assertNotEditing();
-  const services = readServices();
-  const images: ArrayBuffer[] = [];
-  for (const region of regions) {
-    const blob = await readUrl(await services.ExportMap.getRegionImage(region, 1));
-    if (blob.size === 0 || !blob.type.startsWith(readExpectedMimeType(MAP_EXPORT_KINDS.PNG))) {
-      throw new Error('FMG could not draw a part of the map.');
-    }
-    images.push(await blob.arrayBuffer());
-  }
-  fmgWindow.clearMainTip?.();
-  return images;
-}
-
 /** Zooms FMG's view so the box fills most of it. */
 export function showFmgRegion(box: iMapBox) {
   const svg = document.getElementById(FMG_MAP_SVG_ID);

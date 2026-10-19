@@ -12,7 +12,7 @@ export interface iFmgPluginSettings {
   exportKinds: MapExportKind[];
   /** The loopback port FMG was served from last time; FMG's own options live in that origin's storage. */
   fmgAssetServerPort: number | null;
-  /** The vault folder each entity kind's notes live in: where linked notes are created and the link report looks. */
+  /** The vault folder the link report creates each entity kind's notes in; empty uses Obsidian's new-note location. */
   entityFolders: MapEntityFolders;
 }
 

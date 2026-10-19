@@ -2,7 +2,6 @@ import { PluginSettingTab, Setting } from 'obsidian';
 import type { App, Plugin } from 'obsidian';
 
 import {
-  DEFAULT_MAP_ENTITY_FOLDERS,
   MAP_ENTITY_KIND_VALUES,
   readMapEntityFolder,
   readMapEntityKindFormat,
@@ -14,6 +13,8 @@ import { MAP_EXPORT_KIND_VALUES, readMapExportFormat } from '../map/map-export.c
 import type { MapExportKind } from '../map/map-export.constants';
 import { buildMapExportPath } from '../map/map-file-paths';
 import type { iPluginSettingsStore } from './plugin-settings';
+
+const NEW_NOTE_LOCATION_PLACEHOLDER = 'Default location for new notes';
 
 export class FmgSettingsTab extends PluginSettingTab {
   public constructor(
@@ -42,8 +43,10 @@ export class FmgSettingsTab extends PluginSettingTab {
     for (const kind of MAP_EXPORT_KIND_VALUES) this.addExportToggle(containerEl, kind);
 
     new Setting(containerEl)
-      .setName('Linked note folders')
-      .setDesc('Where the link report looks for notes of each kind, and where it creates them.')
+      .setName('New note folders')
+      .setDesc(
+        'Where "Create note" in the map link report puts notes of each kind. Leave empty for Obsidian\'s default location for new notes. Linked notes are found by their properties, in any folder.',
+      )
       .setHeading();
     for (const kind of MAP_ENTITY_KIND_VALUES) this.addEntityFolderSetting(containerEl, kind);
 
@@ -55,7 +58,7 @@ export class FmgSettingsTab extends PluginSettingTab {
   private addEntityFolderSetting(containerEl: HTMLElement, kind: MapEntityKind) {
     new Setting(containerEl).setName(`${readMapEntityKindFormat(kind).label} notes`).addText((text) =>
       text
-        .setPlaceholder(readMapEntityFolder(DEFAULT_MAP_ENTITY_FOLDERS, kind))
+        .setPlaceholder(NEW_NOTE_LOCATION_PLACEHOLDER)
         .setValue(readMapEntityFolder(this.store.read().entityFolders, kind))
         .onChange(async (folder) =>
           this.store.update({ entityFolders: writeMapEntityFolder(this.store.read().entityFolders, kind, folder) }),

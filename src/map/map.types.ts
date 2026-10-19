@@ -1,7 +1,6 @@
 import { em } from 'enumwaii';
 import type { Vault } from 'obsidian';
 
-import type { iMapBox } from '../map-data/map-geometry.types';
 import type { MapExportKind } from './map-export.constants';
 
 /** The vault operations the plugin uses. */
@@ -22,21 +21,12 @@ export interface iSerializedMap {
   content: string;
 }
 
-/** A part of the map drawn into a PNG of `width` by `height` pixels. */
-export interface iMapRegionImage {
-  box: iMapBox;
-  width: number;
-  height: number;
-}
-
 /** The map editor running in the view, as the plugin sees it. */
 export interface iMapEditor {
   /** Opens a map from the bytes of a `.map` file. */
   loadMap: (mapData: ArrayBuffer) => Promise<void>;
   serializeMap: () => Promise<iSerializedMap>;
   exportMap: (kinds: MapExportKind[]) => Promise<iExportedMapFile[]>;
-  /** One PNG per region, in the same order. */
-  renderRegions: (regions: iMapRegionImage[]) => Promise<ArrayBuffer[]>;
 }
 
 export interface iMapSaveReport {

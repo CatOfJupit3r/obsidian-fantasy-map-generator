@@ -1,9 +1,10 @@
+import { getLinkpath } from 'obsidian';
 import type { MetadataCache, TFile, Vault } from 'obsidian';
 
 import type { iMapEntityLink, iMapEntityRef } from '../entities/map-entity.types';
-import { readNoteLink } from './note-link.schema';
+import { NOTE_LINK_PROPERTIES, readNoteLinkEntity } from './note-link.schema';
 
-export type NoteLinkMetadata = Pick<MetadataCache, 'getFileCache'>;
+export type NoteLinkMetadata = Pick<MetadataCache, 'getFileCache' | 'getFirstLinkpathDest'>;
 export type NoteLinkVault = Pick<Vault, 'getMarkdownFiles'>;
 
 export interface iLinkedNote {
@@ -22,7 +23,18 @@ export class NoteLinkIndex {
   ) {}
 
   public readLink(file: TFile): iMapEntityLink | null {
-    return readNoteLink(this.metadataCache.getFileCache(file)?.frontmatter);
+    const cache = this.metadataCache.getFileCache(file);
+    const entity = readNoteLinkEntity(cache?.frontmatter);
+    const mapLink = cache?.frontmatterLinks?.find((link) => link.key === NOTE_LINK_PROPERTIES.MAP);
+    if (!entity || !mapLink) return null;
+
+    const linkpath = getLinkpath(mapLink.link);
+    const mapFile = this.metadataCache.getFirstLinkpathDest(linkpath, file.path);
+    return {
+      map: mapFile?.path ?? linkpath,
+      kind: entity[NOTE_LINK_PROPERTIES.KIND],
+      id: entity[NOTE_LINK_PROPERTIES.ID],
+    };
   }
 
   /** Every linked note, or only those linked to the map at `mapPath`. */

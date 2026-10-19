@@ -86,8 +86,8 @@ export function buildFakeMapExport() {
       ],
       states: [
         { i: 0, name: 'Neutrals' },
-        { i: 1, name: 'Ostmark', fullName: 'Kingdom of Ostmark', capital: 1, neighbors: [2] },
-        { i: 2, name: 'Westmere', capital: 0, neighbors: [1] },
+        { i: 1, name: 'Ostmark', fullName: 'Kingdom of Ostmark', color: '#66c2a5', capital: 1, neighbors: [2] },
+        { i: 2, name: 'Westmere', color: '#fc8d62', capital: 0, neighbors: [1] },
       ],
       provinces: [0, { i: 1, name: 'Ostshire', state: 1, burg: 1 }, { i: 2, name: 'Westshire', state: 2, burg: 2 }],
       cultures: [

@@ -6,8 +6,9 @@ export interface iMapEntityRef {
   id: number;
 }
 
-/** What a note's `fmg` frontmatter holds: the entity and the vault path of the `.map` it belongs to. */
+/** What a note's `fmg-*` properties hold: the entity and the `.map` it belongs to. */
 export interface iMapEntityLink extends iMapEntityRef {
+  /** The vault path of the linked map, or the link as written when it leads to no file. */
   map: string;
 }
 

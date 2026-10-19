@@ -1,7 +1,7 @@
 import { em } from 'enumwaii';
 import { emToZodSchema } from 'enumwaii/zod';
 
-/** The map entities a vault note can stand for, written in its frontmatter as `fmg: { map, kind, id }`. */
+/** The map entities a vault note can stand for, written in its `fmg-kind` property. */
 const mapEntityKindsEnumwaii = em(['STATE', 'PROVINCE', 'BURG', 'CULTURE', 'RELIGION', 'MARKER', 'ZONE']);
 export const MAP_ENTITY_KINDS = mapEntityKindsEnumwaii.enum;
 export type MapEntityKind = (typeof mapEntityKindsEnumwaii)['~type'];
@@ -32,15 +32,18 @@ const mapEntityKindFormats = mapEntityKindsEnumwaii.derive<iMapEntityKindFormat>
 );
 export const readMapEntityKindFormat = (kind: MapEntityKind): iMapEntityKindFormat => mapEntityKindFormats.get(kind);
 
-/** The vault folder each kind's notes live in unless the settings name another one. */
+/**
+ * The vault folder the link report creates each kind's notes in. Empty, the default, leaves it to Obsidian's own
+ * location for new notes; notes are found by their properties, wherever they are.
+ */
 export const DEFAULT_MAP_ENTITY_FOLDERS = mapEntityKindsEnumwaii.derive<string>()(
-  [MAP_ENTITY_KINDS.STATE, 'States'],
-  [MAP_ENTITY_KINDS.PROVINCE, 'Regions & Landmarks'],
-  [MAP_ENTITY_KINDS.BURG, 'Settlements'],
-  [MAP_ENTITY_KINDS.CULTURE, 'Culture'],
-  [MAP_ENTITY_KINDS.RELIGION, 'Religions'],
-  [MAP_ENTITY_KINDS.MARKER, 'Regions & Landmarks'],
-  [MAP_ENTITY_KINDS.ZONE, 'Regions & Landmarks'],
+  [MAP_ENTITY_KINDS.STATE, ''],
+  [MAP_ENTITY_KINDS.PROVINCE, ''],
+  [MAP_ENTITY_KINDS.BURG, ''],
+  [MAP_ENTITY_KINDS.CULTURE, ''],
+  [MAP_ENTITY_KINDS.RELIGION, ''],
+  [MAP_ENTITY_KINDS.MARKER, ''],
+  [MAP_ENTITY_KINDS.ZONE, ''],
 ).record;
 export type MapEntityFolders = Readonly<Record<MapEntityKindName, string>>;
 

@@ -1,6 +1,7 @@
 import type { iMapEntityRef, iMapEntitySummary } from '../entities/map-entity.types';
 import type { FmgMapModel } from '../map-data/fmg-map-model';
 import type { MapPoint } from '../map-data/map-geometry.types';
+import type { iMinimapAreaPath } from './minimap-area-paths';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 /** The highlight ring and the undimmed circle around a point entity, as shares of its crop radius. */
@@ -12,8 +13,6 @@ const COORDINATE_DIGITS = 1;
 export interface iMinimapScene {
   model: FmgMapModel;
   ref: iMapEntityRef;
-  /** The map's SVG or PNG export, drawn under everything; null draws the cells' outline on an empty map. */
-  backdropUrl: string | null;
   /** The neighbours that have a note: they open it on click. */
   linkedNeighbours: iMapEntitySummary[];
   onNeighbourClick: (neighbour: iMapEntitySummary, event: MouseEvent) => unknown;
@@ -21,27 +20,55 @@ export interface iMinimapScene {
   maskId: string;
 }
 
-/** Draws the mini-map: the map export, a dimming layer with a hole over the entity, its outline, its neighbours. */
+/** The mini-map and the layers its controls redraw without touching the view. */
+export interface iMinimapDrawing {
+  svg: SVGSVGElement;
+  /** The map export, under everything. */
+  backdrop: SVGImageElement;
+  /** The areas filled in their FMG colors. */
+  areas: SVGGElement;
+  /** The parts of the export drawn above the areas: labels and burgs. */
+  overlay: SVGImageElement;
+}
+
+/**
+ * Draws the mini-map: the map export, the area colors and the export's labels over them, then a dimming layer with a
+ * hole over the entity, its outline and its neighbours.
+ */
 export class MinimapSvgBuilder {
-  public build(scene: iMinimapScene): SVGSVGElement {
+  public build(scene: iMinimapScene): iMinimapDrawing {
     const { width, height } = scene.model.data.info;
     const svg = this.createElement('svg', {
       class: 'fmg-minimap-svg',
       preserveAspectRatio: 'xMidYMid meet',
       role: 'img',
     });
-
-    if (scene.backdropUrl) {
-      svg.append(
-        this.createElement('image', { href: scene.backdropUrl, x: 0, y: 0, width, height, preserveAspectRatio: 'none' }),
-      );
-    }
+    const imageAttributes = { x: 0, y: 0, width, height, preserveAspectRatio: 'none' };
+    const drawing: iMinimapDrawing = {
+      svg,
+      backdrop: this.createElement('image', imageAttributes),
+      areas: this.createElement('g', { class: 'fmg-minimap-areas' }),
+      overlay: this.createElement('image', imageAttributes),
+    };
+    svg.append(drawing.backdrop, drawing.areas, drawing.overlay);
 
     const point = scene.model.geometry.readPoint(scene.ref);
     svg.append(this.buildDimLayer(scene, point));
     svg.append(point ? this.buildPointRing(scene, point) : this.buildOutline(scene));
     for (const neighbour of scene.linkedNeighbours) svg.append(this.buildNeighbour(scene, neighbour));
-    return svg;
+    return drawing;
+  }
+
+  /** Shows the image at `url`, or hides it for null. */
+  public setImage(image: SVGImageElement, url: string | null) {
+    if (url) image.setAttribute('href', url);
+    else image.removeAttribute('href');
+  }
+
+  public fillAreas(areas: SVGGElement, paths: iMinimapAreaPath[]) {
+    areas.replaceChildren(
+      ...paths.map(({ color, d }) => this.createElement('path', { class: 'fmg-minimap-area', d, fill: color, stroke: color })),
+    );
   }
 
   /** Everything is dimmed except the entity: its cells, or a circle around a point. */
