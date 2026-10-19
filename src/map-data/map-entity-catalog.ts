@@ -81,6 +81,11 @@ export class MapEntityCatalog {
     return id === undefined ? null : (this.find({ kind, id })?.name ?? null);
   }
 
+  /** The color FMG fills the entity's area with, or null when it has none. */
+  public readColor(ref: iMapEntityRef): string | null {
+    return this.entitiesByKind.get(ref.kind)?.get(ref.id)?.color ?? null;
+  }
+
   public readBurg(id: number): FmgBurg | null {
     return this.burgs.get(id) ?? null;
   }

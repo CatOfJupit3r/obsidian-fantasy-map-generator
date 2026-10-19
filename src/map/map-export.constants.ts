@@ -41,7 +41,9 @@ const mapExportFormats = mapExportKindsEnumwaii.derive<iMapExportFormat>()(
 );
 export const readMapExportFormat = (kind: MapExportKind): iMapExportFormat => mapExportFormats.get(kind);
 
+/** The SVG is on so mini-maps stay sharp at any zoom; the PNG's fixed resolution blurs once they zoom in. */
 export const DEFAULT_MAP_EXPORT_KINDS: MapExportKind[] = [
+  MAP_EXPORT_KINDS.SVG,
   MAP_EXPORT_KINDS.PNG,
   MAP_EXPORT_KINDS.JSON,
   MAP_EXPORT_KINDS.MARKERS_GEOJSON,

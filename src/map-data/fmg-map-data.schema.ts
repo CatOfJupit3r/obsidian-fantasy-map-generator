@@ -28,6 +28,8 @@ const optionalBoolean = z.boolean().optional().catch(undefined);
 const entityBase = {
   i: z.number().int().nonnegative(),
   name: optionalString,
+  /** FMG's fill for the entity's area on the map, as a CSS color. */
+  color: optionalString,
   removed: optionalBoolean,
 };
 

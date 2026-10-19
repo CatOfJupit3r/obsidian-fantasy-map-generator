@@ -1,11 +1,11 @@
-import type { FileManager, TFile, Vault } from 'obsidian';
-import { normalizePath } from 'obsidian';
+import { normalizePath, TFile } from 'obsidian';
+import type { FileManager, MetadataCache, Vault } from 'obsidian';
 
-import type { iMapEntityLink } from '../entities/map-entity.types';
-import type { iLinkedNote, NoteLinkIndex } from './note-link-index';
-import { buildNoteLinkFrontmatter, NOTE_LINK_FRONTMATTER_KEY } from './note-link.schema';
+import type { iMapEntityRef } from '../entities/map-entity.types';
+import { NOTE_LINK_PROPERTIES } from './note-link.schema';
 
-export type NoteLinkFileManager = Pick<FileManager, 'processFrontMatter'>;
+export type NoteLinkFileManager = Pick<FileManager, 'processFrontMatter' | 'getNewFileParent'>;
+export type NoteLinkLinktextMetadata = Pick<MetadataCache, 'fileToLinktext'>;
 export type NoteCreationVault = Pick<Vault, 'create' | 'createFolder' | 'getAbstractFileByPath'>;
 
 const MAX_NAME_ATTEMPTS = 100;
@@ -17,33 +17,47 @@ export class NoteLinkWriter {
   public constructor(
     private readonly vault: NoteCreationVault,
     private readonly fileManager: NoteLinkFileManager,
-    private readonly noteLinkIndex: NoteLinkIndex,
+    private readonly metadataCache: NoteLinkLinktextMetadata,
   ) {}
 
-  public async writeLink(file: TFile, link: iMapEntityLink) {
-    await this.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-      frontmatter[NOTE_LINK_FRONTMATTER_KEY] = buildNoteLinkFrontmatter(link);
+  public async writeLink(note: TFile, mapFile: TFile, ref: iMapEntityRef) {
+    await this.fileManager.processFrontMatter(note, (frontmatter: Record<string, unknown>) => {
+      Object.assign(frontmatter, this.buildProperties(note, mapFile, ref));
     });
   }
 
-  /** Points every note linked to the map at its new path, and returns those notes with their new links. */
-  public async followMapRename(oldMapPath: string, newMapPath: string): Promise<iLinkedNote[]> {
-    const movedNotes = this.noteLinkIndex
-      .listLinkedNotes(oldMapPath)
-      .map(({ file, link }) => ({ file, link: { ...link, map: newMapPath } }));
-    for (const { file, link } of movedNotes) await this.writeLink(file, link);
-    return movedNotes;
+  /** The link's properties; `map` is the map's file, or a vault path written as it is when no file is there. */
+  public buildProperties(note: TFile, map: TFile | string, ref: iMapEntityRef): Record<string, string | number> {
+    const mapLinktext = map instanceof TFile ? this.metadataCache.fileToLinktext(map, note.path, false) : map;
+    return {
+      [NOTE_LINK_PROPERTIES.MAP]: `[[${mapLinktext}]]`,
+      [NOTE_LINK_PROPERTIES.KIND]: ref.kind.toLowerCase(),
+      [NOTE_LINK_PROPERTIES.ID]: ref.id,
+    };
   }
 
-  /** A new note named after the entity in `folder`, created when missing, with the link in its frontmatter. */
-  public async createLinkedNote(folder: string, entityName: string, link: iMapEntityLink): Promise<TFile> {
-    const folderPath = normalizePath(folder.trim());
-    const isVaultRoot = folderPath === '/';
-    if (!isVaultRoot && !this.vault.getAbstractFileByPath(folderPath)) await this.vault.createFolder(folderPath);
-
-    const file = await this.vault.create(this.chooseFreePath(isVaultRoot ? '' : folderPath, entityName), '');
-    await this.writeLink(file, link);
+  /**
+   * A new note named after the entity, with the link in its frontmatter: in `folder`, created when missing, or where
+   * Obsidian puts new notes when `folder` is empty.
+   */
+  public async createLinkedNote(folder: string, entityName: string, mapFile: TFile, ref: iMapEntityRef): Promise<TFile> {
+    const file = await this.vault.create(this.chooseFreePath(await this.readFolderPath(folder), entityName), '');
+    await this.writeLink(file, mapFile, ref);
     return file;
+  }
+
+  /** The folder's vault path, with the empty string for the vault root. */
+  private async readFolderPath(folder: string): Promise<string> {
+    if (folder.trim() === '') return this.readVaultPath(this.fileManager.getNewFileParent('').path);
+
+    const folderPath = this.readVaultPath(folder);
+    if (folderPath && !this.vault.getAbstractFileByPath(folderPath)) await this.vault.createFolder(folderPath);
+    return folderPath;
+  }
+
+  private readVaultPath(folder: string): string {
+    const normalized = normalizePath(folder.trim());
+    return normalized === '/' ? '' : normalized;
   }
 
   private chooseFreePath(folder: string, entityName: string): string {

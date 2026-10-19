@@ -1,18 +1,17 @@
-import { normalizePath, TFile } from 'obsidian';
+import { TFile } from 'obsidian';
 import type { App, Plugin } from 'obsidian';
 
 import { readMapEntityFolder, readMapEntityKindFormat } from '../entities/map-entity.constants';
 import type { MapEntityFolders } from '../entities/map-entity.constants';
-import type { iMapEntityRef, iMapEntitySummary } from '../entities/map-entity.types';
-import type { FmgMapModel } from '../map-data/fmg-map-model';
+import type { iMapEntityRef } from '../entities/map-entity.types';
 import type { FmgMapRepository } from '../map-data/fmg-map-repository';
 import { FMG_MAP_VIEW_TYPE, FmgMapView } from '../map/fmg-map-view';
 import { MAP_FILE_EXTENSION } from '../map/map-file-paths';
+import type { MapRenameFollower } from '../map/map-rename-follower';
 import { showNotice } from '../show-notice';
-import { chooseFromSuggestions } from './choice-suggest.modal';
 import { buildLinkReport } from './link-report';
 import { LinkReportModal } from './link-report.modal';
-import type { MapRenameFollower } from './map-rename-follower';
+import type { MapEntityPicker } from './map-entity-picker';
 import type { NoteLinkIndex } from './note-link-index';
 import type { NoteLinkWriter } from './note-link-writer';
 
@@ -28,6 +27,7 @@ export interface iMapLinkCommandsDependencies {
   noteLinkWriter: NoteLinkWriter;
   mapRenameFollower: MapRenameFollower;
   mapRepository: FmgMapRepository;
+  mapEntityPicker: MapEntityPicker;
   readEntityFolders: () => MapEntityFolders;
 }
 
@@ -62,7 +62,7 @@ export class MapLinkCommands {
         if (!(file instanceof TFile) || file.extension !== MAP_FILE_EXTENSION) return;
         this.runInBackground(
           this.dependencies.mapRenameFollower.follow(file, oldPath),
-          `Could not update the notes linked to ${file.path}`,
+          `Could not move the exports of ${file.path}`,
         );
       }),
     );
@@ -86,12 +86,12 @@ export class MapLinkCommands {
   }
 
   private async linkNote(note: TFile) {
-    const { noteLinkIndex, noteLinkWriter, mapRepository } = this.dependencies;
-    const mapFile = await this.chooseMap(noteLinkIndex.readLink(note)?.map);
+    const { noteLinkIndex, noteLinkWriter, mapRepository, mapEntityPicker } = this.dependencies;
+    const mapFile = await mapEntityPicker.chooseMap(noteLinkIndex.readLink(note)?.map);
     if (!mapFile) return;
 
     const model = await mapRepository.read(mapFile.path);
-    const entity = await this.chooseEntity(mapFile.path, model);
+    const entity = await mapEntityPicker.chooseEntity(mapFile.path, model);
     if (!entity) return;
 
     const linkedNote = noteLinkIndex.findNote(mapFile.path, entity);
@@ -99,8 +99,8 @@ export class MapLinkCommands {
       showNotice(`${entity.name} is already linked to ${linkedNote.path}. Remove its link there first.`);
       return;
     }
-    await noteLinkWriter.writeLink(note, { map: mapFile.path, kind: entity.kind, id: entity.id });
-    showNotice(`Linked ${note.basename} to ${entity.name}. Saving the map writes its facts into the note.`);
+    await noteLinkWriter.writeLink(note, mapFile, entity);
+    showNotice(`Linked ${note.basename} to ${entity.name}. Add an fmg-facts or fmg-map block to show it.`);
   }
 
   private async showOnMap(note: TFile) {
@@ -131,9 +131,9 @@ export class MapLinkCommands {
   }
 
   private async openLinkReport() {
-    const { app, noteLinkIndex, noteLinkWriter, mapRepository } = this.dependencies;
+    const { app, noteLinkIndex, noteLinkWriter, mapRepository, mapEntityPicker } = this.dependencies;
     const activeMap = app.workspace.getActiveViewOfType(FmgMapView)?.file ?? null;
-    const mapFile = activeMap ?? (await this.chooseMap(undefined));
+    const mapFile = activeMap ?? (await mapEntityPicker.chooseMap(undefined));
     if (!mapFile) return;
 
     const model = await mapRepository.read(mapFile.path);
@@ -144,59 +144,18 @@ export class MapLinkCommands {
           mapPath: mapFile.path,
           catalog: model.catalog,
           linkedNotes: noteLinkIndex.listLinkedNotes(),
-          folderNotes: this.listEntityFolderNotes(),
           hasMap: (mapPath) => app.vault.getAbstractFileByPath(mapPath) instanceof TFile,
         }),
       createNote: async (entity) =>
         noteLinkWriter.createLinkedNote(
           readMapEntityFolder(this.dependencies.readEntityFolders(), entity.kind),
           entity.name,
-          { map: mapFile.path, kind: entity.kind, id: entity.id },
+          mapFile,
+          entity,
         ),
       openNote: async (file) => app.workspace.getLeaf('tab').openFile(file),
       showError: (message) => showNotice(message),
     }).open();
-  }
-
-  /** The notes in the configured entity folders and their subfolders. */
-  private listEntityFolderNotes(): TFile[] {
-    const folders = [...new Set(Object.values(this.dependencies.readEntityFolders()))]
-      .map((folder) => normalizePath(folder.trim()))
-      .filter((folder) => folder !== '/');
-    return this.dependencies.app.vault
-      .getMarkdownFiles()
-      .filter((file) => folders.some((folder) => file.path.startsWith(`${folder}/`)));
-  }
-
-  /** The map a note links to, the vault's only map, or the one picked from the vault's maps. */
-  private async chooseMap(linkedMapPath: string | undefined): Promise<TFile | null> {
-    const { app } = this.dependencies;
-    const linkedMap = linkedMapPath ? app.vault.getAbstractFileByPath(linkedMapPath) : null;
-    if (linkedMap instanceof TFile) return linkedMap;
-
-    const maps = app.vault.getFiles().filter((file) => file.extension === MAP_FILE_EXTENSION);
-    if (maps.length === 0) {
-      showNotice('The vault has no .map files. Run "New map" to create one.');
-      return null;
-    }
-    if (maps.length === 1) return maps[0] ?? null;
-    return chooseFromSuggestions(app, { items: maps, readText: (file) => file.path, placeholder: 'Pick a map' });
-  }
-
-  private async chooseEntity(mapPath: string, model: FmgMapModel): Promise<iMapEntitySummary | null> {
-    const { app, noteLinkIndex } = this.dependencies;
-    const linkedNames = new Map(
-      noteLinkIndex.listLinkedNotes(mapPath).map(({ file, link }) => [`${link.kind}:${link.id}`, file.basename]),
-    );
-    return chooseFromSuggestions(app, {
-      items: model.catalog.listAll(),
-      readText: (entity) => {
-        const linkedTo = linkedNames.get(`${entity.kind}:${entity.id}`);
-        const label = readMapEntityKindFormat(entity.kind).label;
-        return linkedTo ? `${entity.name} · ${label} · linked to ${linkedTo}` : `${entity.name} · ${label}`;
-      },
-      placeholder: 'Pick the state, province, burg, culture, religion, marker or zone',
-    });
   }
 
   private async readEntityName(mapPath: string, ref: iMapEntityRef): Promise<string> {

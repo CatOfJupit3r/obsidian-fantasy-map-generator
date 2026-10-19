@@ -5,13 +5,12 @@ import {
   BRIDGE_REQUEST_KINDS,
   emptyPayloadSchema,
   exportedMapFilesSchema,
-  renderedRegionsSchema,
   savedMapSchema,
 } from '../bridge/bridge-protocol';
 import type { iMapEntityRef } from '../entities/map-entity.types';
 import type { iMapBox } from '../map-data/map-geometry.types';
 import type { MapExportKind } from '../map/map-export.constants';
-import type { iExportedMapFile, iMapEditor, iMapRegionImage, iSerializedMap } from '../map/map.types';
+import type { iExportedMapFile, iMapEditor, iSerializedMap } from '../map/map.types';
 
 /** FMG generates a map on start-up before it can open one, and big maps take a while to load and render. */
 const FMG_TIMEOUTS_MS = {
@@ -66,16 +65,6 @@ export class FmgAdapter implements iMapEditor {
       FMG_TIMEOUTS_MS.export,
     );
     return exported.files;
-  }
-
-  public async renderRegions(regions: iMapRegionImage[]): Promise<ArrayBuffer[]> {
-    const rendered = await this.client.request(
-      BRIDGE_REQUEST_KINDS.RENDER_REGIONS,
-      { regions: regions.map((region) => ({ ...region.box, width: region.width, height: region.height })) },
-      renderedRegionsSchema,
-      FMG_TIMEOUTS_MS.export,
-    );
-    return rendered.images;
   }
 
   /** Zooms FMG's view to the box. */

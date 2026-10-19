@@ -21,43 +21,71 @@ Copy `dist/` to `<vault>/.obsidian/plugins/azgaar-fantasy-map-generator/` and en
 - FMG's own autosave to browser storage and its "save to desktop" reminders are off: the vault file is where the map lives.
 - A save over a file that changed on disk asks whether to reload it or overwrite it. A change on disk with no unsaved edits in FMG reloads the map.
 - "New map" creates `Untitled map.map` (or `Untitled map 1.map`, ...) in the maps folder, creating the folder when missing, and saves the map FMG generates for it.
-- Settings: the maps folder, the exports to write on save, the folders of linked notes, and the bundled FMG version.
+- Settings: the maps folder, the exports to write on save, the folder per kind for notes the link report creates, and the bundled FMG version.
 
 ## Linked notes
 
-A note stands for a map entity through its frontmatter, by FMG's own id, so renaming the note, the entity in FMG or the `.map` file keeps the link:
+A note stands for a map entity through three flat properties, by FMG's own id, so renaming the note or the entity in FMG keeps the link. `fmg-map` is a real link: the Properties view shows it as one, and Obsidian updates it when the `.map` file moves (with "Automatically update internal links" on). The properties work in Bases and Dataview like any others:
 
 ```yaml
-fmg:
-  map: Maps/Aster.map
-  kind: STATE # STATE, PROVINCE, BURG, CULTURE, RELIGION, MARKER or ZONE
-  id: 7
+fmg-map: "[[Maps/Aster.map]]"
+fmg-kind: state # state, province, burg, culture, religion, marker or zone
+fmg-id: 7
 ```
 
 - "Link note to map entity" links the active note: it picks the map (the one already linked, the vault's only map, or one you choose) and the entity from the map's Full JSON export.
 - "Show on map" opens the linked map in FMG and zooms to the entity.
 - Ctrl/Cmd+click on the FMG map opens the note of the most specific linked entity under the cursor: a burg or marker first, then a zone, province, state, culture and religion. A plain click still opens FMG's own editors.
-- "Map link report" lists the map's entities that have no note, each with a button that creates one in its kind's folder, and the notes in those folders that stand for no entity: no link, a link to an entity that is gone, or a link to a map that is gone. The folders are settings, one per kind: `States`, `Regions & Landmarks` (provinces, markers, zones), `Settlements`, `Culture` and `Religions` by default.
-- Renaming or moving a `.map` moves its exports and thumbnails with it, points its notes at the new path and rewrites their facts blocks.
+- "Map link report" lists the map's entities that have no note, each with a button that creates one, and the linked notes that lead nowhere: to an entity the map no longer has, or to a map that is not in the vault. Linked notes are found by their properties, in any folder. New notes go to Obsidian's default location for new notes, or to a folder you set per kind in the settings.
+- Renaming or moving a `.map` moves its exports with it.
+
+The plugin never writes into a note's text. What a note shows of the map is up to the note: put the blocks below where you want them, or in your templates.
+
+### Embedding anywhere
+
+Both blocks show the entity their own note links to when left empty, and any entity when they name one, so a travelogue or a session log can show a country it has no link to. A block names its entity in one of two ways:
+
+````markdown
+```fmg-map
+note: "[[Ostmark]]" # borrows that note's link; stays right when the entity is renamed in FMG
+```
+
+```fmg-facts
+kind: state # with id or name
+name: Ostmark
+map: "[[Aster.map]]" # needed only when the vault has more than one map
+```
+````
+
+`map` and `note` take a link, quoted or not, or a plain path. "Insert mini-map" and "Insert map facts" pick a map and an entity and insert a block that names it: by its note when it has one, else by kind and id.
 
 ### Map facts
 
-Each save writes a generated block at the end of every linked note, fenced by `<!-- fmg-map-facts:start ... -->` and `<!-- fmg-map-facts:end -->`. The plugin replaces only what is between the fences; the note's own text, before and after them, is never touched. The block is a `[!map-facts]` callout with the entity's thumbnail and what the map knows about it, in the map's own units: area, population, capital, state and province, neighbours (linked to their notes), rivers, dominant biomes, and the temperature and precipitation range. The facts come from the Full JSON export; when that export is off, the save asks FMG for it without writing it.
+An `fmg-facts` code block lists what the map knows about the note's linked entity, in the map's own units: area, population, capital, state and province, neighbours (linked to their notes), rivers, dominant biomes, and the temperature and precipitation range. It reads the Full JSON export and redraws whenever a save rewrites it. An empty block shows the linked entity; it takes the same `map`, `note`, `kind`, `id` and `name` options as `fmg-map` to show another one:
 
-The thumbnail is a cropped PNG of the entity, rendered by FMG on save next to the map: `Maps/Aster.fmg.state-7.png`.
+````markdown
+```fmg-facts
+```
+````
 
 ### Mini-map
 
 An `fmg-map` code block draws the map's SVG export (or its PNG export when the SVG export is off) cropped to the note's linked entity, with the entity outlined and the rest dimmed. Scroll to zoom, drag to pan, double-click to reset; clicking a neighbour that has a note opens it. It reads only the exports, never FMG itself, and redraws when a save refreshes them. Every option is optional:
 
+The view stays on the map: it never pans or zooms past its edges unless you tick "Show beyond the map edge" in the layers panel. The layers button in the mini-map's bottom-right corner picks what areas are filled with, in FMG's own colors (states, provinces, cultures, religions or none), and shows or hides rivers and lakes, routes, borders, burgs and state names. The areas are drawn from the Full JSON export, so they don't depend on which layers were on in FMG when you saved; FMG's own area fills are left out. By default a mini-map fills areas of its entity's kind (states for burgs, markers and zones), and maps of provinces, cultures and religions start without state names. The choice lasts while the note is open. Layers can be toggled only with the SVG export, whose parts stay sharp at any zoom; the PNG export has its layers baked in.
+
 ````markdown
 ```fmg-map
-map: Maps/Aster.map # defaults to the linked map
-kind: STATE # with id or name, shows that entity instead of the linked one
+map: "[[Aster.map]]" # defaults to the linked map, or the vault's only map
+kind: state # with id or name, shows that entity instead of the linked one
 name: Ostmark
 height: 400 # in pixels, 120 to 1200; 320 by default
 ```
 ````
+
+### From earlier versions
+
+Earlier versions linked notes with a nested `fmg: { map, kind, id }` property, wrote a `[!map-facts]` callout into each linked note on save, and baked a PNG thumbnail per entity (`Maps/Aster.fmg.state-7.png`). On start, the plugin moves such notes to the flat properties, replaces the callout with empty `fmg-map` and `fmg-facts` blocks in the same place, and moves the thumbnails to the trash. Notes already in the current shape are left alone.
 
 ## Exports
 
@@ -66,11 +94,9 @@ Written next to the map, named after it with a `.fmg.` infix so they never clash
 | Setting         | File                             | Format                                                                                           | Default |
 | --------------- | -------------------------------- | ------------------------------------------------------------------------------------------------ | ------- |
 | PNG render      | `Maps/Aster.fmg.png`             | The whole map at FMG's PNG resolution setting, without scale bar or vignette                     | on      |
-| SVG render      | `Maps/Aster.fmg.svg`             | FMG's "Export to SVG" of the whole map                                                           | off     |
+| SVG render      | `Maps/Aster.fmg.svg`             | FMG's "Export to SVG" of the whole map; mini-maps draw from it, sharp at any zoom               | on      |
 | Full JSON       | `Maps/Aster.fmg.json`            | FMG's "Export to JSON, Full": `info`, `settings`, `pack` (burgs, markers, states, cells), `grid` | on      |
 | Markers GeoJSON | `Maps/Aster.fmg.markers.geojson` | FMG's "Export markers to GeoJSON": a `FeatureCollection` of `Point` features                     | on      |
-
-Thumbnails of linked entities are written next to them as `Maps/Aster.fmg.<kind>-<id>.png`, whatever the export settings.
 
 Burgs are in the JSON under `pack.burgs` (`name`, `x`, `y`, `cell`, `state`, ...), markers under `pack.markers` and in the GeoJSON (`properties.id`, `type`, `name`, `x`, `y`; coordinates are FMG's longitude and latitude). `x` and `y` are map units on a map of `info.width` by `info.height`; both renders show that whole area (the PNG scaled by FMG's PNG resolution setting). Climate per grid cell is in `grid.cells[].temp` and `grid.cells[].prec`.
 

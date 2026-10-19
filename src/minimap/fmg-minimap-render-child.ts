@@ -1,85 +1,104 @@
-import { Keymap, MarkdownRenderChild, parseYaml, TFile } from 'obsidian';
-import type { App } from 'obsidian';
+import { TFile } from 'obsidian';
 
 import { readMapEntityKindFormat } from '../entities/map-entity.constants';
-import type { iMapEntitySummary } from '../entities/map-entity.types';
-import type { NoteLinkIndex } from '../links/note-link-index';
+import { MapBlockRenderChild } from '../map-blocks/map-block-render-child';
+import type { iMapBlockHost } from '../map-blocks/map-block-render-child';
+import type { iMapBlockTarget } from '../map-blocks/map-block-target-resolver';
 import { MAP_EXPORT_KINDS } from '../map/map-export.constants';
 import { buildMapExportPath } from '../map/map-file-paths';
 import { MINIMAP_HEIGHT_PX, parseMinimapBlockOptions } from './fmg-minimap-block.schema';
+import type { MinimapBlockOptions } from './fmg-minimap-block.schema';
+import type { MinimapAreaPaths } from './minimap-area-paths';
+import type { MinimapBackdropVariants } from './minimap-backdrop-variants';
+import { MinimapLayerControls } from './minimap-layer-controls';
+import {
+  HIDDEN_FMG_SELECTORS,
+  MINIMAP_LAYER_VALUES,
+  OVERLAY_GROUP_IDS,
+  readDefaultAreaColoring,
+  readDefaultVisibleLayers,
+  readMinimapAreaColoringFormat,
+  readMinimapLayerFormat,
+} from './minimap-layers.constants';
+import type { iMinimapLayerState } from './minimap-layers.types';
 import { MinimapSvgBuilder } from './minimap-svg-builder';
-import type { iMinimapTarget, MinimapTargetResolver } from './minimap-target-resolver';
+import type { iMinimapDrawing } from './minimap-svg-builder';
 import { MinimapViewport } from './minimap-viewport';
 
 /** The view zooms in until it shows this share of the entity's crop, and out to this multiple of the map's width. */
 const MIN_VIEW_SHARE_OF_CROP = 0.05;
 const MAX_VIEW_SHARE_OF_MAP = 1.5;
 
-/** The exports a block draws from, the crisp SVG first; a change to any of them redraws the block. */
+/** The exports a block draws from, the crisp SVG first. */
 const BACKDROP_EXPORT_KINDS = [MAP_EXPORT_KINDS.SVG, MAP_EXPORT_KINDS.PNG];
+const SVG_EXTENSION = 'svg';
 
-export interface iMinimapHost {
-  app: App;
-  resolver: MinimapTargetResolver;
-  noteLinkIndex: NoteLinkIndex;
+export interface iMinimapHost extends iMapBlockHost {
   /** A page-unique id for the block's SVG mask. */
   createMaskId: () => string;
+  backdropVariants: MinimapBackdropVariants;
+  areaPaths: MinimapAreaPaths;
 }
 
-/** One `fmg-map` block: the map's export cropped to an entity, redrawn whenever the map's exports change. */
-export class FmgMinimapRenderChild extends MarkdownRenderChild {
+interface iMinimapView {
+  drawing: iMinimapDrawing;
+  viewport: MinimapViewport;
+}
+
+interface iMinimapLayerImages {
+  backdropUrl: string;
+  /** Null when no layer above the areas is shown. */
+  overlayUrl: string | null;
+}
+
+/**
+ * One `fmg-map` block: the map's export cropped to an entity, areas filled in their FMG colors, the entity outlined and
+ * the rest dimmed. Its layers button changes what is drawn for as long as the note stays open.
+ */
+export class FmgMinimapRenderChild extends MapBlockRenderChild<MinimapBlockOptions> {
+  protected readonly watchedExportKinds = [MAP_EXPORT_KINDS.JSON, ...BACKDROP_EXPORT_KINDS];
+
   private readonly svgBuilder = new MinimapSvgBuilder();
 
-  private watchedPaths = new Set<string>();
+  /** Kept across redraws, so a save does not undo the reader's choice. */
+  private layerState: iMinimapLayerState | null = null;
+
+  /** Numbers the image requests, so a slow one never replaces a newer one. */
+  private layerRequestCount = 0;
 
   public constructor(
     containerEl: HTMLElement,
-    private readonly source: string,
-    private readonly sourcePath: string,
-    private readonly host: iMinimapHost,
+    source: string,
+    sourcePath: string,
+    private readonly minimapHost: iMinimapHost,
   ) {
-    super(containerEl);
+    super(containerEl, source, sourcePath, minimapHost);
   }
 
-  public onload() {
-    const { vault, metadataCache } = this.host.app;
-    this.registerEvent(
-      vault.on('modify', (file) => {
-        if (this.watchedPaths.has(file.path)) this.redraw();
-      }),
-    );
-    this.registerEvent(
-      metadataCache.on('changed', (file) => {
-        if (file.path === this.sourcePath) this.redraw();
-      }),
-    );
-    this.redraw();
+  protected parseOptions(yaml: unknown): MinimapBlockOptions | string {
+    return parseMinimapBlockOptions(yaml);
   }
 
-  private redraw() {
-    void this.draw().catch((error: unknown) => {
-      this.showMessage(error instanceof Error ? error.message : String(error));
-    });
-  }
-
-  private async draw() {
-    const options = parseMinimapBlockOptions(this.readYaml());
-    if (typeof options === 'string') {
-      this.showMessage(options);
-      return;
-    }
-
-    const target = await this.host.resolver.resolve(options, this.sourcePath);
-    const mapPath = target.mapFile.path;
-    this.watchedPaths = new Set(
-      [MAP_EXPORT_KINDS.JSON, ...BACKDROP_EXPORT_KINDS].map((kind) => buildMapExportPath(mapPath, kind)),
-    );
-    const backdrop = this.readBackdrop(mapPath);
-
-    this.containerEl.empty();
+  protected render(target: iMapBlockTarget, options: MinimapBlockOptions) {
+    const backdrop = this.readBackdrop(target.mapFile.path);
     const frame = this.containerEl.createDiv({ cls: 'fmg-minimap' });
     frame.style.setProperty('--fmg-minimap-height', `${options.height ?? MINIMAP_HEIGHT_PX.default}px`);
-    this.drawMap(frame, target, backdrop);
+    // The map and its controls share a box, so the controls sit in the map's corner and not over the captions.
+    const stage = frame.createDiv({ cls: 'fmg-minimap-stage' });
+    const layerState = this.layerState ?? this.readDefaultLayerState(target);
+    this.layerState = layerState;
+    const { drawing, viewport } = this.drawMap(stage, target, layerState);
+
+    this.applyLayers(drawing, target, backdrop, layerState);
+    new MinimapLayerControls(stage, {
+      state: layerState,
+      canToggleLayers: backdrop?.extension === SVG_EXTENSION,
+      onChange: (state) => {
+        this.layerState = state;
+        this.applyLayers(drawing, target, backdrop, state);
+        viewport.setBounds(this.readViewBounds(target, state));
+      },
+    });
 
     const kindLabel = readMapEntityKindFormat(target.entity.kind).label;
     frame.createDiv({
@@ -91,43 +110,113 @@ export class FmgMinimapRenderChild extends MarkdownRenderChild {
         cls: 'fmg-minimap-caption',
         text: 'Turn on the SVG or PNG export and save the map to draw the map under the outline.',
       });
+    } else if (backdrop.extension !== SVG_EXTENSION) {
+      frame.createDiv({
+        cls: 'fmg-minimap-caption',
+        text: 'Drawn from the PNG export, which blurs when zoomed in and keeps its layers. Turn on the SVG export and save the map for a sharp one.',
+      });
     }
   }
 
-  private drawMap(frame: HTMLElement, target: iMinimapTarget, backdrop: TFile | null) {
+  private drawMap(stage: HTMLElement, target: iMapBlockTarget, layerState: iMinimapLayerState): iMinimapView {
     const { model, entity, mapFile } = target;
     const cropBox = model.geometry.readCropBox(entity);
     if (!cropBox) throw new Error(`${entity.name} has no place on the map.`);
 
     const viewportHolder: { viewport: MinimapViewport | null } = { viewport: null };
-    const svg = this.svgBuilder.build({
+    const drawing = this.svgBuilder.build({
       model,
       ref: entity,
-      backdropUrl: backdrop ? this.host.app.vault.getResourcePath(backdrop) : null,
       linkedNeighbours: model.neighbours
         .read(entity)
         .filter((neighbour) => this.host.noteLinkIndex.findNote(mapFile.path, neighbour)),
       onNeighbourClick: (neighbour, event) => {
-        if (!viewportHolder.viewport?.wasDragged()) this.openNeighbourNote(mapFile.path, neighbour, event);
+        if (!viewportHolder.viewport?.wasDragged()) this.openEntityNote(mapFile.path, neighbour, event);
       },
-      maskId: this.host.createMaskId(),
+      maskId: this.minimapHost.createMaskId(),
     });
-    frame.append(svg);
+    stage.append(drawing.svg);
 
-    viewportHolder.viewport = new MinimapViewport(svg, cropBox, {
-      minWidth: (cropBox.x1 - cropBox.x0) * MIN_VIEW_SHARE_OF_CROP,
-      maxWidth: model.data.info.width * MAX_VIEW_SHARE_OF_MAP,
-    });
+    const viewport = new MinimapViewport(
+      drawing.svg,
+      cropBox,
+      {
+        minWidth: (cropBox.x1 - cropBox.x0) * MIN_VIEW_SHARE_OF_CROP,
+        maxWidth: model.data.info.width * MAX_VIEW_SHARE_OF_MAP,
+      },
+      this.readViewBounds(target, layerState),
+    );
+    viewportHolder.viewport = viewport;
+    return { drawing, viewport };
   }
 
-  private openNeighbourNote(mapPath: string, neighbour: iMapEntitySummary, event: MouseEvent) {
-    const note = this.host.noteLinkIndex.findNote(mapPath, neighbour);
-    if (!note) return;
-    void this.host.app.workspace
-      .openLinkText(note.path, this.sourcePath, Keymap.isModEvent(event))
+  /** The map's own box, which the view stays inside, or null once the reader lets it leave the map. */
+  private readViewBounds(target: iMapBlockTarget, state: iMinimapLayerState) {
+    return state.canLeaveMap ? null : target.model.geometry.readMapBox();
+  }
+
+  private readDefaultLayerState(target: iMapBlockTarget): iMinimapLayerState {
+    const { kind } = target.entity;
+    return {
+      areaColoring: readDefaultAreaColoring(kind),
+      visibleLayers: readDefaultVisibleLayers(kind),
+      canLeaveMap: false,
+    };
+  }
+
+  private applyLayers(drawing: iMinimapDrawing, target: iMapBlockTarget, backdrop: TFile | null, state: iMinimapLayerState) {
+    const coloredKind = readMinimapAreaColoringFormat(state.areaColoring).kind;
+    this.svgBuilder.fillAreas(drawing.areas, coloredKind ? this.minimapHost.areaPaths.read(target.model, coloredKind) : []);
+
+    this.layerRequestCount += 1;
+    if (!backdrop || backdrop.extension !== SVG_EXTENSION) {
+      this.svgBuilder.setImage(drawing.backdrop, backdrop ? this.host.app.vault.getResourcePath(backdrop) : null);
+      this.svgBuilder.setImage(drawing.overlay, null);
+      return;
+    }
+
+    const request = this.layerRequestCount;
+    void this.readLayerImages(backdrop, state)
+      .then(({ backdropUrl, overlayUrl }) => {
+        if (request !== this.layerRequestCount) return;
+        this.svgBuilder.setImage(drawing.backdrop, backdropUrl);
+        this.svgBuilder.setImage(drawing.overlay, overlayUrl);
+      })
       .catch((error: unknown) => {
-        this.showMessage(`Could not open ${note.path}: ${error instanceof Error ? error.message : String(error)}`);
+        this.showMessage(`Could not draw ${backdrop.path}: ${error instanceof Error ? error.message : String(error)}`);
       });
+  }
+
+  /**
+   * The SVG export split in two around the area colors: under them, the shown layers that sit below; over them, the
+   * shown burgs and names alone. FMG's own area fills are always left out, since the block draws its own.
+   */
+  private async readLayerImages(svgFile: TFile, state: iMinimapLayerState): Promise<iMinimapLayerImages> {
+    const { backdropVariants } = this.minimapHost;
+    // Each image depends only on its own layers, so toggling one never rebuilds the other.
+    const readHiddenSelectors = (isAboveAreas: boolean) =>
+      MINIMAP_LAYER_VALUES.filter(
+        (layer) => readMinimapLayerFormat(layer).isAboveAreas === isAboveAreas && !state.visibleLayers.has(layer),
+      ).flatMap((layer) => readMinimapLayerFormat(layer).selectors);
+    const overlaySelectors = OVERLAY_GROUP_IDS.map((id) => `#${id}`);
+
+    const backdropUrl = await backdropVariants.readUrl(svgFile, [
+      ...HIDDEN_FMG_SELECTORS,
+      ...readHiddenSelectors(false),
+      ...overlaySelectors,
+    ]);
+    const hasOverlay = MINIMAP_LAYER_VALUES.some(
+      (layer) => readMinimapLayerFormat(layer).isAboveAreas && state.visibleLayers.has(layer),
+    );
+    if (!hasOverlay) return { backdropUrl, overlayUrl: null };
+
+    const otherGroupSelectors = (await backdropVariants.listGroupIds(svgFile))
+      .filter((id) => !OVERLAY_GROUP_IDS.includes(id))
+      .map((id) => `#${CSS.escape(id)}`);
+    return {
+      backdropUrl,
+      overlayUrl: await backdropVariants.readUrl(svgFile, [...otherGroupSelectors, ...readHiddenSelectors(true)]),
+    };
   }
 
   private readBackdrop(mapPath: string): TFile | null {
@@ -136,21 +225,5 @@ export class FmgMinimapRenderChild extends MarkdownRenderChild {
       if (file instanceof TFile) return file;
     }
     return null;
-  }
-
-  /** The block's YAML, or a string that fails the option schema when the YAML does not parse. */
-  private readYaml(): unknown {
-    if (this.source.trim() === '') return {};
-    try {
-      const yaml: unknown = parseYaml(this.source);
-      return yaml;
-    } catch {
-      return 'unreadable YAML';
-    }
-  }
-
-  private showMessage(message: string) {
-    this.containerEl.empty();
-    this.containerEl.createDiv({ cls: 'fmg-minimap-message', text: message });
   }
 }

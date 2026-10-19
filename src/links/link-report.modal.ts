@@ -15,7 +15,7 @@ export interface iLinkReportSource {
   showError: (message: string) => unknown;
 }
 
-/** The map's entities without a note, each with a button to create one, and the notes without an entity. */
+/** The map's entities without a note, each with a button to create one, and the linked notes that lead nowhere. */
 export class LinkReportModal extends Modal {
   /** The kind groups the reader opened, kept open across redraws. */
   private readonly openKinds = new Set<MapEntityKind>();
@@ -48,7 +48,7 @@ export class LinkReportModal extends Modal {
     const unlinkedEntities = report.unlinkedEntities.filter(
       (entity) => !this.createdEntities.has(this.readEntityKey(entity)),
     );
-    const unmatchedNotes = report.unmatchedNotes.filter((file) => !this.createdNotes.has(file));
+    const brokenNotes = report.brokenNotes.filter((file) => !this.createdNotes.has(file));
 
     new Setting(contentEl).setName(`Map entities with no note (${unlinkedEntities.length})`).setHeading();
     for (const kind of MAP_ENTITY_KIND_VALUES) {
@@ -56,9 +56,9 @@ export class LinkReportModal extends Modal {
       if (entities.length > 0) this.drawEntityGroup(contentEl, kind, entities);
     }
 
-    new Setting(contentEl).setName(`Notes with no map entity (${unmatchedNotes.length})`).setHeading();
+    new Setting(contentEl).setName(`Notes linked to nothing on a map (${brokenNotes.length})`).setHeading();
     const notesList = contentEl.createEl('ul', { cls: 'fmg-link-report-notes' });
-    for (const file of unmatchedNotes) {
+    for (const file of brokenNotes) {
       const link = notesList.createEl('li').createEl('a', { text: file.path, href: '#' });
       link.addEventListener('click', (event) => {
         event.preventDefault();

@@ -19,12 +19,12 @@ describe('readPluginSettings', () => {
     expect(readPluginSettings({ mapsFolder: 12, exportKinds: 'png' })).toEqual(DEFAULT_PLUGIN_SETTINGS);
   });
 
-  it("keeps each stored entity folder, with the kind's default for one missing or not text", () => {
+  it('keeps each stored entity folder, with no folder for a kind missing or not text', () => {
     const { entityFolders } = readPluginSettings({ entityFolders: { STATE: 'World/States', BURG: 3, RIVER: 'x' } });
 
     expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.STATE)).toBe('World/States');
-    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.BURG)).toBe('Settlements');
-    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.ZONE)).toBe('Regions & Landmarks');
+    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.BURG)).toBe('');
+    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.ZONE)).toBe('');
     expect(entityFolders).not.toHaveProperty('RIVER');
   });
 });
