@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+import { MAP_ENTITY_KINDS } from '../entities/map-entity.constants';
+import type { iMapEntityRef } from '../entities/map-entity.types';
+import type { iMapBox } from '../map-data/map-geometry.types';
 import { MAP_EXPORT_KINDS } from '../map/map-export.constants';
 import type { MapExportKind } from '../map/map-export.constants';
 import { captureDownload } from './fmg-download-capture';
@@ -31,8 +34,17 @@ interface iFmgServices {
   ExportJson: { exportToJson: (type: 'Full') => Promise<void> };
 }
 
+/** The cell arrays of FMG's packed graph that say which area entity holds each cell. */
+interface iFmgPack {
+  cells: Record<'state' | 'province' | 'culture' | 'religion', ArrayLike<number>>;
+  zones?: { i: number; cells: number[]; hidden?: boolean }[];
+}
+
 interface iFmgGlobals {
   Services?: iFmgServices;
+  pack?: iFmgPack;
+  Pack?: { findCell: (x: number, y: number) => number | undefined };
+  zoomTo?: (x: number, y: number, scale: number, durationMs: number) => void;
   /** Non-zero while an FMG editing tool is active; FMG refuses to save or export then. */
   customization?: number;
   options?: { map: { graph: { width: number; height: number } }; app: { export: { pngResolution: number } } };
@@ -47,6 +59,22 @@ const shownMapSchema = z.object({ seed: z.string(), mapId: z.number() });
 const FMG_ALERT_ID = 'alert';
 const FMG_ALERT_MESSAGE_ID = 'alertMessage';
 const ALERT_POLL_MS = 250;
+
+/** FMG's map element and the group its pan and zoom transform applies to. */
+const FMG_MAP_SVG_ID = 'map';
+const FMG_VIEWBOX_ID = 'viewbox';
+/** Like FMG's own "reveal": the box fills this share of the view, between these zoom scales. */
+const SHOW_REGION_FILL = 0.65;
+const SHOW_REGION_SCALES = { min: 1, max: 20 } as const;
+const SHOW_REGION_DURATION_MS = 1500;
+
+/** The area kinds read from the cell arrays, the most specific first; zones come before them. */
+const CELL_OWNER_KINDS = [
+  { kind: MAP_ENTITY_KINDS.PROVINCE, cells: 'province' },
+  { kind: MAP_ENTITY_KINDS.STATE, cells: 'state' },
+  { kind: MAP_ENTITY_KINDS.CULTURE, cells: 'culture' },
+  { kind: MAP_ENTITY_KINDS.RELIGION, cells: 'religion' },
+] as const;
 
 /** What each export must be: FMG answers some failures with an empty or differently typed blob. */
 function readExpectedMimeType(kind: MapExportKind): string {
@@ -191,4 +219,63 @@ export async function exportFmgMap(kind: MapExportKind): Promise<ArrayBuffer> {
     throw new Error(`FMG's ${kind} export came back empty or as ${blob.type || 'an unknown type'}.`);
   }
   return blob.arrayBuffer();
+}
+
+/** Each region as a PNG through FMG's own region renderer, the one its PNG export uses. */
+export async function renderFmgRegions(regions: iFmgRegion[]): Promise<ArrayBuffer[]> {
+  assertNotEditing();
+  const services = readServices();
+  const images: ArrayBuffer[] = [];
+  for (const region of regions) {
+    const blob = await readUrl(await services.ExportMap.getRegionImage(region, 1));
+    if (blob.size === 0 || !blob.type.startsWith(readExpectedMimeType(MAP_EXPORT_KINDS.PNG))) {
+      throw new Error('FMG could not draw a part of the map.');
+    }
+    images.push(await blob.arrayBuffer());
+  }
+  fmgWindow.clearMainTip?.();
+  return images;
+}
+
+/** Zooms FMG's view so the box fills most of it. */
+export function showFmgRegion(box: iMapBox) {
+  const svg = document.getElementById(FMG_MAP_SVG_ID);
+  if (!svg || !fmgWindow.zoomTo) throw new Error('FMG has not started yet.');
+
+  const fit = Math.min(
+    (svg.clientWidth * SHOW_REGION_FILL) / Math.max(1, box.x1 - box.x0),
+    (svg.clientHeight * SHOW_REGION_FILL) / Math.max(1, box.y1 - box.y0),
+  );
+  const scale = Math.min(SHOW_REGION_SCALES.max, Math.max(SHOW_REGION_SCALES.min, fit));
+  fmgWindow.zoomTo((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2, scale, SHOW_REGION_DURATION_MS);
+}
+
+/** Whether an FMG editing tool is active; clicks then belong to that tool. */
+export function isFmgEditing(): boolean {
+  return Boolean(fmgWindow.customization);
+}
+
+/** The map cell under a point of the page, or null outside the map. */
+export function readFmgCellAt(clientX: number, clientY: number): number | null {
+  const viewbox = document.getElementById(FMG_VIEWBOX_ID);
+  const matrix = viewbox instanceof SVGGraphicsElement ? viewbox.getScreenCTM() : null;
+  if (!matrix || !fmgWindow.Pack) return null;
+
+  const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse());
+  return fmgWindow.Pack.findCell(point.x, point.y) ?? null;
+}
+
+/** The area entities holding a cell: visible zones first, then province, state, culture and religion. */
+export function readFmgCellOwners(cellId: number): iMapEntityRef[] {
+  const { pack } = fmgWindow;
+  if (!pack) return [];
+
+  const zones = (pack.zones ?? [])
+    .filter((zone) => !zone.hidden && zone.cells.includes(cellId))
+    .map((zone) => ({ kind: MAP_ENTITY_KINDS.ZONE, id: zone.i }));
+  const areas = CELL_OWNER_KINDS.flatMap(({ kind, cells }) => {
+    const id = pack.cells[cells][cellId] ?? 0;
+    return id > 0 ? [{ kind, id }] : [];
+  });
+  return [...zones, ...areas];
 }

@@ -2,9 +2,18 @@ import { FileSystemAdapter, normalizePath, Plugin } from 'obsidian';
 
 import { FMG_ASSET_ENTRY_FILE } from './fmg/fmg-asset-server.constants';
 import { FmgAssetServer } from './fmg/fmg-asset-server';
+import { LinkedNotesRefresher } from './links/linked-notes-refresher';
+import { MapLinkCommands } from './links/map-link-commands';
+import { MapRenameFollower } from './links/map-rename-follower';
+import { NoteLinkIndex } from './links/note-link-index';
+import { NoteLinkWriter } from './links/note-link-writer';
+import { FmgMapRepository } from './map-data/fmg-map-repository';
 import { FMG_MAP_VIEW_TYPE, FmgMapView } from './map/fmg-map-view';
 import { MAP_FILE_EXTENSION } from './map/map-file-paths';
 import { NewMapCreator } from './map/new-map.creator';
+import { FMG_MINIMAP_BLOCK_LANGUAGE } from './minimap/fmg-minimap-block.schema';
+import { FmgMinimapRenderChild } from './minimap/fmg-minimap-render-child';
+import { MinimapTargetResolver } from './minimap/minimap-target-resolver';
 import { FmgSettingsTab } from './settings/fmg-settings-tab';
 import { readPluginSettings } from './settings/plugin-settings';
 import type { iFmgPluginSettings, iPluginSettingsStore } from './settings/plugin-settings';
@@ -18,6 +27,9 @@ export default class FmgPlugin extends Plugin {
 
   private fmgPageUrl: string | null = null;
 
+  /** Numbers the mini-maps' SVG masks, whose ids must be unique in the page. */
+  private minimapCount = 0;
+
   public async onload() {
     this.settings = readPluginSettings(await this.loadData());
     await this.startFmgAssetServer();
@@ -27,14 +39,36 @@ export default class FmgPlugin extends Plugin {
       update: async (change) => this.updateSettings(change),
     };
 
+    const { vault, metadataCache, fileManager } = this.app;
+    const noteLinkIndex = new NoteLinkIndex(vault, metadataCache);
+    const mapRepository = new FmgMapRepository(vault);
+    const linkedNotesRefresher = new LinkedNotesRefresher(
+      vault,
+      metadataCache,
+      noteLinkIndex,
+      mapRepository,
+      () => this.settings.exportKinds,
+    );
+    const noteLinkWriter = new NoteLinkWriter(vault, fileManager, noteLinkIndex);
+    const mapLinkCommands = new MapLinkCommands({
+      app: this.app,
+      noteLinkIndex,
+      noteLinkWriter,
+      mapRenameFollower: new MapRenameFollower(vault, noteLinkWriter, linkedNotesRefresher),
+      mapRepository,
+      readEntityFolders: () => this.settings.entityFolders,
+    });
+
     this.registerView(
       FMG_MAP_VIEW_TYPE,
       (leaf) =>
         new FmgMapView(leaf, {
-          vault: this.app.vault,
+          vault,
           readFmgPageUrl: () => this.readFmgPageUrl(),
           hasFmgBundle: async () => this.fmgPageUrl !== null,
           readExportKinds: () => this.settings.exportKinds,
+          refreshLinkedNotes: async (mapFile, editor) => linkedNotesRefresher.refresh(mapFile, editor),
+          openEntityNote: async (mapPath, candidates) => mapLinkCommands.openEntityNote(mapPath, candidates),
         }),
     );
     this.registerExtensions([MAP_FILE_EXTENSION], FMG_MAP_VIEW_TYPE);
@@ -59,6 +93,22 @@ export default class FmgPlugin extends Plugin {
         }
         return true;
       },
+    });
+    mapLinkCommands.register(this);
+
+    const minimapResolver = new MinimapTargetResolver(vault, metadataCache, noteLinkIndex, mapRepository);
+    this.registerMarkdownCodeBlockProcessor(FMG_MINIMAP_BLOCK_LANGUAGE, (source, element, context) => {
+      context.addChild(
+        new FmgMinimapRenderChild(element, source, context.sourcePath, {
+          app: this.app,
+          resolver: minimapResolver,
+          noteLinkIndex,
+          createMaskId: () => {
+            this.minimapCount += 1;
+            return `fmg-minimap-mask-${this.minimapCount}`;
+          },
+        }),
+      );
     });
     this.addSettingTab(new FmgSettingsTab(this.app, this, settingsStore));
   }

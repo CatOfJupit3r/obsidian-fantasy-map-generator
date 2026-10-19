@@ -32,9 +32,9 @@ export class BridgeHost {
   }
 
   /** Tells the plugin something happened in the frame; events need no answer. */
-  public notify(kind: BridgeEventKind) {
+  public notify(kind: BridgeEventKind, payload: object = {}) {
     this.eventCount += 1;
-    postBridgeMessage(this.channel, { kind, id: `event-${this.eventCount}`, payload: {} });
+    postBridgeMessage(this.channel, { kind, id: `event-${this.eventCount}`, payload });
   }
 
   public dispose() {

@@ -7,9 +7,19 @@ import {
   BRIDGE_REQUEST_KINDS,
   exportMapRequestSchema,
   loadMapRequestSchema,
+  renderRegionsRequestSchema,
+  showRegionRequestSchema,
 } from '../bridge/bridge-protocol';
+import { forwardEntityClicks } from './fmg-entity-click';
 import { hideFadedLoadingOverlay } from './fmg-loading-overlay';
-import { exportFmgMap, loadFmgMap, onFmgMapShown, serializeFmgMap } from './fmg-runtime';
+import {
+  exportFmgMap,
+  loadFmgMap,
+  onFmgMapShown,
+  renderFmgRegions,
+  serializeFmgMap,
+  showFmgRegion,
+} from './fmg-runtime';
 import { turnOffFmgAutosave } from './fmg-stored-options';
 
 /**
@@ -26,6 +36,11 @@ async function exportFiles(payload: unknown): Promise<iBridgeReply> {
   return { payload: { files }, transfer: files.map((file) => file.data) };
 }
 
+async function renderRegions(payload: unknown): Promise<iBridgeReply> {
+  const images = await renderFmgRegions(renderRegionsRequestSchema.parse(payload).regions);
+  return { payload: { images }, transfer: images };
+}
+
 const handleRequest: BridgeRequestHandler = async (kind, payload) => {
   switch (kind) {
     case BRIDGE_REQUEST_KINDS.LOAD_MAP: {
@@ -36,6 +51,11 @@ const handleRequest: BridgeRequestHandler = async (kind, payload) => {
       return { payload: { mapText: await serializeFmgMap() } };
     case BRIDGE_REQUEST_KINDS.EXPORT_MAP:
       return exportFiles(payload);
+    case BRIDGE_REQUEST_KINDS.RENDER_REGIONS:
+      return renderRegions(payload);
+    case BRIDGE_REQUEST_KINDS.SHOW_REGION:
+      showFmgRegion(showRegionRequestSchema.parse(payload).box);
+      return { payload: {} };
     default:
       throw new Error(`Unknown request: ${String(kind)}`);
   }
@@ -73,6 +93,7 @@ export function startBridge(frameWindow: Window): BridgeHost | null {
   frameWindow.addEventListener('DOMContentLoaded', () => hideFadedLoadingOverlay(frameWindow.document), { once: true });
   const host = new BridgeHost(createWindowChannel(frameWindow, frameWindow.parent, parentOrigin), handleRequest);
   forwardSaveShortcut(frameWindow, host);
+  forwardEntityClicks(frameWindow, host);
   const stopWaiting = onFmgMapShown(() => {
     stopWaiting();
     host.notify(BRIDGE_EVENT_KINDS.READY);

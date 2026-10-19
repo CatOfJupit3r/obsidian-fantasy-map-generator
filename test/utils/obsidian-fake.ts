@@ -14,7 +14,9 @@ export class TFile extends TAbstractFile {
   public extension = '';
 }
 
-export class TFolder extends TAbstractFile {}
+export class TFolder extends TAbstractFile {
+  public children: TAbstractFile[] = [];
+}
 
 export function normalizePath(path: string): string {
   const normalized = path

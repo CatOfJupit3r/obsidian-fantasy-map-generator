@@ -3,7 +3,8 @@ import type { z } from 'zod';
 import { postBridgeMessage, readBridgeEnvelope } from './bridge-channel';
 import type { iBridgeChannel } from './bridge-channel';
 import { BridgeFailureError } from './bridge-failure.error';
-import { BRIDGE_MESSAGE_KINDS, bridgeFailureSchema } from './bridge-protocol';
+import type { iMapEntityRef } from '../entities/map-entity.types';
+import { BRIDGE_MESSAGE_KINDS, bridgeFailureSchema, entityClickedSchema } from './bridge-protocol';
 import type { BridgeEnvelope, BridgeRequestKind } from './bridge-protocol';
 import { BridgeTimeoutError } from './bridge-timeout.error';
 
@@ -52,6 +53,8 @@ export class BridgeClient {
   private readonly readyListeners = new Set<() => unknown>();
 
   private readonly saveRequestListeners = new Set<() => unknown>();
+
+  private readonly entityClickListeners = new Set<(candidates: iMapEntityRef[]) => unknown>();
 
   private hasPeerAnnouncedReady = false;
 
@@ -110,11 +113,18 @@ export class BridgeClient {
     return () => this.saveRequestListeners.delete(listener);
   }
 
+  /** Runs `listener` with the entities under each Ctrl/Cmd+click on the map, the most specific first. */
+  public onEntityClicked(listener: (candidates: iMapEntityRef[]) => unknown): () => unknown {
+    this.entityClickListeners.add(listener);
+    return () => this.entityClickListeners.delete(listener);
+  }
+
   /** Stops listening and fails every request still waiting for an answer. */
   public dispose() {
     this.stopListening();
     this.readyListeners.clear();
     this.saveRequestListeners.clear();
+    this.entityClickListeners.clear();
     for (const request of this.pending.values()) request.reject(new BridgeFailureError('The map editor was closed.'));
     this.pending.clear();
   }
@@ -126,6 +136,9 @@ export class BridgeClient {
         break;
       case BRIDGE_MESSAGE_KINDS.SAVE_REQUESTED:
         for (const listener of this.saveRequestListeners) listener();
+        break;
+      case BRIDGE_MESSAGE_KINDS.ENTITY_CLICKED:
+        this.announceEntityClick(envelope);
         break;
       case BRIDGE_MESSAGE_KINDS.RESULT:
         this.takePending(envelope.id)?.resolve(envelope);
@@ -141,6 +154,12 @@ export class BridgeClient {
     this.hasPeerAnnouncedReady = true;
     for (const listener of this.readyListeners) listener();
     this.readyListeners.clear();
+  }
+
+  private announceEntityClick(envelope: BridgeEnvelope) {
+    const clicked = entityClickedSchema.safeParse(envelope.payload);
+    if (!clicked.success) return;
+    for (const listener of this.entityClickListeners) listener(clicked.data.candidates);
   }
 
   private readFailureMessage(envelope: BridgeEnvelope): string {

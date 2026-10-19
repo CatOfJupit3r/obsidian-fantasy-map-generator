@@ -37,16 +37,20 @@ export class FakeVault implements MapVault {
 
   private readonly entries = new Map<string, TAbstractFile>();
 
+  private readonly root = createFolder('/');
+
   public seedFile(path: string, content: string | ArrayBuffer): TFile {
     const file = createFile(path, this.nowMs);
     this.entries.set(path, file);
     this.contents.set(path, content);
+    this.readParentFolder(path)?.children.push(file);
     return file;
   }
 
   public seedFolder(path: string): TFolder {
     const folder = createFolder(path);
     this.entries.set(path, folder);
+    this.readParentFolder(path)?.children.push(folder);
     return folder;
   }
 
@@ -72,6 +76,38 @@ export class FakeVault implements MapVault {
 
   public getAbstractFileByPath(path: string): TAbstractFile | null {
     return this.entries.get(path) ?? null;
+  }
+
+  public getRoot(): TFolder {
+    return this.root;
+  }
+
+  public getMarkdownFiles(): TFile[] {
+    return [...this.entries.values()].filter((entry): entry is TFile => entry instanceof TFile && entry.extension === 'md');
+  }
+
+  public async process(file: TFile, change: (data: string) => string): Promise<string> {
+    const content = this.contents.get(this.requireFile(file).path);
+    const changed = change(typeof content === 'string' ? content : '');
+    this.write(file, changed);
+    return changed;
+  }
+
+  /** Moves a file within existing folders, as `Vault.rename` does. */
+  public async rename(file: TAbstractFile, newPath: string): Promise<void> {
+    if (!(file instanceof TFile)) throw new Error('The fake vault renames files only.');
+    if (this.entries.has(newPath)) throw new Error(`File already exists: ${newPath}`);
+    const content = this.contents.get(this.requireFile(file).path) ?? '';
+    const oldFolder = this.readParentFolder(file.path);
+    if (oldFolder) oldFolder.children = oldFolder.children.filter((child) => child !== file);
+    this.entries.delete(file.path);
+    this.contents.delete(file.path);
+
+    const moved = createFile(newPath, file.stat.mtime);
+    Object.assign(file, { path: moved.path, name: moved.name, basename: moved.basename, extension: moved.extension });
+    this.entries.set(newPath, file);
+    this.contents.set(newPath, content);
+    this.readParentFolder(newPath)?.children.push(file);
   }
 
   public async readBinary(file: TFile): Promise<ArrayBuffer> {
@@ -111,6 +147,13 @@ export class FakeVault implements MapVault {
     if (folder && !(this.entries.get(folder) instanceof TFolder)) throw new Error(`Folder does not exist: ${folder}`);
 
     return this.seedFile(path, data);
+  }
+
+  private readParentFolder(path: string): TFolder | null {
+    const separator = path.lastIndexOf('/');
+    if (separator === -1) return path === '/' ? null : this.root;
+    const parent = this.entries.get(path.slice(0, separator));
+    return parent instanceof TFolder ? parent : null;
   }
 
   private requireFile(file: TFile): TFile {

@@ -9,3 +9,63 @@
   height: 100%;
   border: 0;
 }
+
+.callout[data-callout='map-facts'] {
+  --callout-color: var(--color-purple-rgb);
+  --callout-icon: lucide-map;
+}
+
+.fmg-minimap {
+  margin: var(--size-4-2) 0;
+}
+
+.fmg-minimap-svg {
+  display: block;
+  width: 100%;
+  height: var(--fmg-minimap-height, 320px);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  cursor: grab;
+  touch-action: none;
+}
+
+.fmg-minimap-svg:active {
+  cursor: grabbing;
+}
+
+.fmg-minimap-dim {
+  fill: var(--background-primary);
+  opacity: 0.6;
+}
+
+.fmg-minimap-outline {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.fmg-minimap-neighbour {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.fmg-minimap-neighbour:hover {
+  fill: rgba(var(--interactive-accent-rgb), 0.15);
+  stroke: var(--interactive-accent);
+}
+
+.fmg-minimap-caption,
+.fmg-minimap-message {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  margin-top: var(--size-4-1);
+}
+
+.fmg-link-report-notes {
+  margin: 0 0 var(--size-4-4);
+}

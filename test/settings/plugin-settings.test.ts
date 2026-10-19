@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { MAP_ENTITY_KINDS, readMapEntityFolder } from '../../src/entities/map-entity.constants';
 import { MAP_EXPORT_KINDS } from '../../src/map/map-export.constants';
 import { DEFAULT_PLUGIN_SETTINGS, readPluginSettings } from '../../src/settings/plugin-settings';
 
@@ -16,5 +17,14 @@ describe('readPluginSettings', () => {
     expect(readPluginSettings({ exportKinds: [] }).exportKinds).toEqual([]);
     expect(readPluginSettings(undefined)).toEqual(DEFAULT_PLUGIN_SETTINGS);
     expect(readPluginSettings({ mapsFolder: 12, exportKinds: 'png' })).toEqual(DEFAULT_PLUGIN_SETTINGS);
+  });
+
+  it("keeps each stored entity folder, with the kind's default for one missing or not text", () => {
+    const { entityFolders } = readPluginSettings({ entityFolders: { STATE: 'World/States', BURG: 3, RIVER: 'x' } });
+
+    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.STATE)).toBe('World/States');
+    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.BURG)).toBe('Settlements');
+    expect(readMapEntityFolder(entityFolders, MAP_ENTITY_KINDS.ZONE)).toBe('Regions & Landmarks');
+    expect(entityFolders).not.toHaveProperty('RIVER');
   });
 });

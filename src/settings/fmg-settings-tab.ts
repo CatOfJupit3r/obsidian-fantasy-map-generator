@@ -1,6 +1,14 @@
 import { PluginSettingTab, Setting } from 'obsidian';
 import type { App, Plugin } from 'obsidian';
 
+import {
+  DEFAULT_MAP_ENTITY_FOLDERS,
+  MAP_ENTITY_KIND_VALUES,
+  readMapEntityFolder,
+  readMapEntityKindFormat,
+  writeMapEntityFolder,
+} from '../entities/map-entity.constants';
+import type { MapEntityKind } from '../entities/map-entity.constants';
 import { FMG_PIN } from '../fmg/fmg-pin';
 import { MAP_EXPORT_KIND_VALUES, readMapExportFormat } from '../map/map-export.constants';
 import type { MapExportKind } from '../map/map-export.constants';
@@ -34,8 +42,25 @@ export class FmgSettingsTab extends PluginSettingTab {
     for (const kind of MAP_EXPORT_KIND_VALUES) this.addExportToggle(containerEl, kind);
 
     new Setting(containerEl)
+      .setName('Linked note folders')
+      .setDesc('Where the link report looks for notes of each kind, and where it creates them.')
+      .setHeading();
+    for (const kind of MAP_ENTITY_KIND_VALUES) this.addEntityFolderSetting(containerEl, kind);
+
+    new Setting(containerEl)
       .setName('Fantasy Map Generator version')
       .setDesc(`${FMG_PIN.tag} (${FMG_PIN.commit.slice(0, 7)}), bundled with the plugin. MIT licence: LICENSE-FMG.`);
+  }
+
+  private addEntityFolderSetting(containerEl: HTMLElement, kind: MapEntityKind) {
+    new Setting(containerEl).setName(`${readMapEntityKindFormat(kind).label} notes`).addText((text) =>
+      text
+        .setPlaceholder(readMapEntityFolder(DEFAULT_MAP_ENTITY_FOLDERS, kind))
+        .setValue(readMapEntityFolder(this.store.read().entityFolders, kind))
+        .onChange(async (folder) =>
+          this.store.update({ entityFolders: writeMapEntityFolder(this.store.read().entityFolders, kind, folder) }),
+        ),
+    );
   }
 
   private addExportToggle(containerEl: HTMLElement, kind: MapExportKind) {

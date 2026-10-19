@@ -1,5 +1,6 @@
 import { normalizePath } from 'obsidian';
 
+import type { iMapEntityRef } from '../entities/map-entity.types';
 import { readMapExportFormat } from './map-export.constants';
 import type { MapExportKind } from './map-export.constants';
 
@@ -30,4 +31,14 @@ export function buildNewMapPath(folder: string, attempt: number): string {
 export function buildMapCopyPath(mapPath: string, attempt: number): string {
   const marker = attempt === 0 ? 'unsaved changes' : `unsaved changes ${attempt + 1}`;
   return `${mapPath.replace(MAP_EXTENSION_PATTERN, '')} (${marker}).${MAP_FILE_EXTENSION}`;
+}
+
+/** Every file the plugin writes for `Maps/Aster.map` starts with `Maps/Aster.fmg.`: its exports and thumbnails. */
+export function buildMapGeneratedFilePrefix(mapPath: string): string {
+  return `${mapPath.replace(MAP_EXTENSION_PATTERN, '')}.fmg.`;
+}
+
+/** `Maps/Aster.map` keeps the thumbnail of its state 7 as `Maps/Aster.fmg.state-7.png`. */
+export function buildEntityThumbnailPath(mapPath: string, ref: iMapEntityRef): string {
+  return `${buildMapGeneratedFilePrefix(mapPath)}${ref.kind.toLowerCase()}-${ref.id}.png`;
 }

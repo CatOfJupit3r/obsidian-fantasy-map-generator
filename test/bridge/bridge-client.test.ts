@@ -14,6 +14,7 @@ import {
 } from '../../src/bridge/bridge-protocol';
 import type { BridgeEnvelope } from '../../src/bridge/bridge-protocol';
 import { BridgeTimeoutError } from '../../src/bridge/bridge-timeout.error';
+import { MAP_ENTITY_KINDS } from '../../src/entities/map-entity.constants';
 import { createFakeWindowPair, flushMessages } from '../utils/fake-window-pair';
 
 const PLUGIN_ORIGIN = 'app://obsidian.md';
@@ -220,6 +221,18 @@ describe('BridgeHost with BridgeClient', () => {
     await flushMessages();
 
     expect(onSaveRequested).toHaveBeenCalledOnce();
+  });
+
+  it('passes the clicked entities to the plugin, and drops a click it cannot read', async () => {
+    const { host, client } = setUpHost(async () => ({ payload: {} }));
+    const onEntityClicked = vi.fn();
+    client.onEntityClicked(onEntityClicked);
+
+    host.notify(BRIDGE_EVENT_KINDS.ENTITY_CLICKED, { candidates: [{ kind: MAP_ENTITY_KINDS.BURG, id: 12 }] });
+    host.notify(BRIDGE_EVENT_KINDS.ENTITY_CLICKED, { candidates: [{ kind: 'RIVER', id: 3 }] });
+    await flushMessages();
+
+    expect(onEntityClicked.mock.calls).toEqual([[[{ kind: MAP_ENTITY_KINDS.BURG, id: 12 }]]]);
   });
 
   it('announces READY to the plugin', async () => {

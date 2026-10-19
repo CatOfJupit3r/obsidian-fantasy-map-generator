@@ -1,10 +1,11 @@
-import { TFile } from 'obsidian';
+import type { TFile } from 'obsidian';
 
 import type { MapExportKind } from './map-export.constants';
 import { readMapExportFormat } from './map-export.constants';
 import { buildMapCopyPath, buildMapExportPath } from './map-file-paths';
 import { MAP_SAVE_OUTCOME_KIND_CASES } from './map.types';
 import type { iMapEditor, iMapSaveReport, MapSaveOutcome, MapVault } from './map.types';
+import { VaultBinaryWriter } from './vault-binary-writer';
 
 /** File systems store modification times coarsely (FAT keeps two seconds), so smaller differences are no change. */
 const MTIME_TOLERANCE_MS = 2000;
@@ -27,12 +28,16 @@ export class MapSession {
   /** The file's modification time when the session last read or wrote it. */
   private knownMtime: number | null = null;
 
+  private readonly binaryWriter: VaultBinaryWriter;
+
   public constructor(
     private readonly vault: MapVault,
     private readonly editor: iMapEditor,
     private readonly readExportKinds: () => MapExportKind[],
     private readonly now: () => number = () => Date.now(),
-  ) {}
+  ) {
+    this.binaryWriter = new VaultBinaryWriter(vault);
+  }
 
   /** An empty file is a new map: it keeps the map the editor generated and saves it. */
   public async open(file: TFile): Promise<iMapSaveReport | null> {
@@ -92,18 +97,12 @@ export class MapSession {
         if (exported.data.byteLength === 0)
           throw new Error(`The ${readMapExportFormat(exported.kind).label} is empty.`);
         const path = buildMapExportPath(file.path, exported.kind);
-        await this.writeBinary(path, exported.data);
+        await this.binaryWriter.write(path, exported.data);
         exportPaths.push(path);
       }
     } catch (error) {
       return { mapPath: file.path, exportPaths, exportError: describeError(error) };
     }
     return { mapPath: file.path, exportPaths, exportError: null };
-  }
-
-  private async writeBinary(path: string, data: ArrayBuffer) {
-    const existing = this.vault.getAbstractFileByPath(path);
-    if (existing instanceof TFile) await this.vault.modifyBinary(existing, data);
-    else await this.vault.createBinary(path, data);
   }
 }
