@@ -4,4 +4,6 @@ import type { MinimapAreaColoring, MinimapLayer } from './minimap-layers.constan
 export interface iMinimapLayerState {
   areaColoring: MinimapAreaColoring;
   visibleLayers: ReadonlySet<MinimapLayer>;
+  /** Whether the view may pan and zoom past the map's edges; it stays on the map until the reader allows it. */
+  canLeaveMap: boolean;
 }

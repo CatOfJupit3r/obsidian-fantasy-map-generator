@@ -11,8 +11,11 @@
 }
 
 .fmg-minimap {
-  position: relative;
   margin: var(--size-4-2) 0;
+}
+
+.fmg-minimap-stage {
+  position: relative;
 }
 
 .fmg-minimap-areas {
@@ -26,8 +29,8 @@
 
 .fmg-minimap-controls {
   position: absolute;
-  top: var(--size-4-2);
   right: var(--size-4-2);
+  bottom: var(--size-4-2);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -35,7 +38,7 @@
 }
 
 .fmg-minimap-controls-button {
-  order: -1;
+  order: 1;
   background: var(--background-primary);
   box-shadow: var(--shadow-s);
 }
@@ -60,6 +63,11 @@
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
+}
+
+.fmg-minimap-controls-separated {
+  padding-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
 }
 
 .fmg-minimap-svg {

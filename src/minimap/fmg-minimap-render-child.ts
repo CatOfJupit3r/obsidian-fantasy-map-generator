@@ -40,6 +40,11 @@ export interface iMinimapHost extends iMapBlockHost {
   areaPaths: MinimapAreaPaths;
 }
 
+interface iMinimapView {
+  drawing: iMinimapDrawing;
+  viewport: MinimapViewport;
+}
+
 interface iMinimapLayerImages {
   backdropUrl: string;
   /** Null when no layer above the areas is shown. */
@@ -78,17 +83,20 @@ export class FmgMinimapRenderChild extends MapBlockRenderChild<MinimapBlockOptio
     const backdrop = this.readBackdrop(target.mapFile.path);
     const frame = this.containerEl.createDiv({ cls: 'fmg-minimap' });
     frame.style.setProperty('--fmg-minimap-height', `${options.height ?? MINIMAP_HEIGHT_PX.default}px`);
-    const drawing = this.drawMap(frame, target);
-
+    // The map and its controls share a box, so the controls sit in the map's corner and not over the captions.
+    const stage = frame.createDiv({ cls: 'fmg-minimap-stage' });
     const layerState = this.layerState ?? this.readDefaultLayerState(target);
     this.layerState = layerState;
+    const { drawing, viewport } = this.drawMap(stage, target, layerState);
+
     this.applyLayers(drawing, target, backdrop, layerState);
-    new MinimapLayerControls(frame, {
+    new MinimapLayerControls(stage, {
       state: layerState,
       canToggleLayers: backdrop?.extension === SVG_EXTENSION,
       onChange: (state) => {
         this.layerState = state;
         this.applyLayers(drawing, target, backdrop, state);
+        viewport.setBounds(this.readViewBounds(target, state));
       },
     });
 
@@ -110,7 +118,7 @@ export class FmgMinimapRenderChild extends MapBlockRenderChild<MinimapBlockOptio
     }
   }
 
-  private drawMap(frame: HTMLElement, target: iMapBlockTarget): iMinimapDrawing {
+  private drawMap(stage: HTMLElement, target: iMapBlockTarget, layerState: iMinimapLayerState): iMinimapView {
     const { model, entity, mapFile } = target;
     const cropBox = model.geometry.readCropBox(entity);
     if (!cropBox) throw new Error(`${entity.name} has no place on the map.`);
@@ -127,18 +135,33 @@ export class FmgMinimapRenderChild extends MapBlockRenderChild<MinimapBlockOptio
       },
       maskId: this.minimapHost.createMaskId(),
     });
-    frame.append(drawing.svg);
+    stage.append(drawing.svg);
 
-    viewportHolder.viewport = new MinimapViewport(drawing.svg, cropBox, {
-      minWidth: (cropBox.x1 - cropBox.x0) * MIN_VIEW_SHARE_OF_CROP,
-      maxWidth: model.data.info.width * MAX_VIEW_SHARE_OF_MAP,
-    });
-    return drawing;
+    const viewport = new MinimapViewport(
+      drawing.svg,
+      cropBox,
+      {
+        minWidth: (cropBox.x1 - cropBox.x0) * MIN_VIEW_SHARE_OF_CROP,
+        maxWidth: model.data.info.width * MAX_VIEW_SHARE_OF_MAP,
+      },
+      this.readViewBounds(target, layerState),
+    );
+    viewportHolder.viewport = viewport;
+    return { drawing, viewport };
+  }
+
+  /** The map's own box, which the view stays inside, or null once the reader lets it leave the map. */
+  private readViewBounds(target: iMapBlockTarget, state: iMinimapLayerState) {
+    return state.canLeaveMap ? null : target.model.geometry.readMapBox();
   }
 
   private readDefaultLayerState(target: iMapBlockTarget): iMinimapLayerState {
     const { kind } = target.entity;
-    return { areaColoring: readDefaultAreaColoring(kind), visibleLayers: readDefaultVisibleLayers(kind) };
+    return {
+      areaColoring: readDefaultAreaColoring(kind),
+      visibleLayers: readDefaultVisibleLayers(kind),
+      canLeaveMap: false,
+    };
   }
 
   private applyLayers(drawing: iMinimapDrawing, target: iMapBlockTarget, backdrop: TFile | null, state: iMinimapLayerState) {

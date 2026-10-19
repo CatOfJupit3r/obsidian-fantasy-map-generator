@@ -18,7 +18,10 @@ export interface iMinimapLayerControlsOptions {
   onChange: (state: iMinimapLayerState) => unknown;
 }
 
-/** The layers button in a mini-map's corner and the panel it opens: what to fill areas by, and which layers to show. */
+/**
+ * The layers button in a mini-map's corner and the panel it opens: what to fill areas by, which layers to show, and
+ * whether the view may leave the map.
+ */
 export class MinimapLayerControls {
   private state: iMinimapLayerState;
 
@@ -43,6 +46,15 @@ export class MinimapLayerControls {
     if (options.canToggleLayers) {
       for (const layer of MINIMAP_LAYER_VALUES) this.addLayerToggle(panel, layer);
     }
+    this.addLeaveMapToggle(panel);
+  }
+
+  private addLeaveMapToggle(panel: HTMLElement) {
+    const row = panel.createEl('label', { cls: 'fmg-minimap-controls-row fmg-minimap-controls-separated' });
+    const checkbox = row.createEl('input', { type: 'checkbox' });
+    checkbox.checked = this.state.canLeaveMap;
+    row.createSpan({ text: 'Show beyond the map edge' });
+    checkbox.addEventListener('change', () => this.update({ ...this.state, canLeaveMap: checkbox.checked }));
   }
 
   private addAreaColoringSelect(panel: HTMLElement) {

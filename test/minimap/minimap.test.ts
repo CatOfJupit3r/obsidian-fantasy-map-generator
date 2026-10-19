@@ -5,7 +5,7 @@ import { parseFmgMapData } from '../../src/map-data/fmg-map-data.schema';
 import { FmgMapModel } from '../../src/map-data/fmg-map-model';
 import { parseMinimapBlockOptions } from '../../src/minimap/fmg-minimap-block.schema';
 import { MinimapAreaPaths } from '../../src/minimap/minimap-area-paths';
-import { panBox, zoomBox } from '../../src/minimap/minimap-viewport';
+import { fitBox, panBox, zoomBox } from '../../src/minimap/minimap-viewport';
 import { buildFakeMapExportText } from '../utils/fake-fmg-map';
 
 const BOX = { x0: 0, y0: 0, x1: 100, y1: 50 };
@@ -27,6 +27,26 @@ describe('zoomBox', () => {
 describe('panBox', () => {
   it('moves the view against the drag, so the map follows the pointer', () => {
     expect(panBox(BOX, 10, -5)).toEqual({ x0: -10, y0: 5, x1: 90, y1: 55 });
+  });
+});
+
+describe('fitBox', () => {
+  const MAP = { x0: 0, y0: 0, x1: 200, y1: 100 };
+
+  it('widens the box to the screen around its centre', () => {
+    expect(fitBox({ x0: 40, y0: 40, x1: 60, y1: 60 }, 2, null)).toEqual({ x0: 30, y0: 40, x1: 70, y1: 60 });
+  });
+
+  it('moves a box past the edge back onto the map', () => {
+    expect(fitBox({ x0: -30, y0: 10, x1: 10, y1: 30 }, 2, MAP)).toEqual({ x0: 0, y0: 10, x1: 40, y1: 30 });
+  });
+
+  it('shrinks a box larger than the map to fit inside it', () => {
+    expect(fitBox({ x0: -100, y0: -100, x1: 300, y1: 200 }, 4, MAP)).toEqual({ x0: 0, y0: 25, x1: 200, y1: 75 });
+  });
+
+  it('leaves the box off the map when it has no bounds', () => {
+    expect(fitBox({ x0: -30, y0: 10, x1: 10, y1: 30 }, 2, null)).toEqual({ x0: -30, y0: 10, x1: 10, y1: 30 });
   });
 });
 
