@@ -3,7 +3,18 @@ import { createServer, STATUS_CODES } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
 
-import { FMG_ASSET_ENTRY_FILE, FMG_ASSET_SERVER_HOST, HTTP_METHODS } from './fmg-asset-server.constants';
+import { z } from 'zod';
+
+import {
+  FMG_ASSET_ENTRY_FILE,
+  FMG_ASSET_SERVER_ANY_PORT,
+  FMG_ASSET_SERVER_HOST,
+  HTTP_METHODS,
+  PORT_IN_USE_ERROR_CODE,
+} from './fmg-asset-server.constants';
+import type { iFmgAssetServerAddress } from './fmg-asset-server.types';
+
+const portInUseErrorSchema = z.object({ code: z.literal(PORT_IN_USE_ERROR_CODE) });
 
 /** Serves the bundled FMG to its iframe without relying on Obsidian's blocked nested app:// resources. */
 export class FmgAssetServer {
@@ -13,7 +24,11 @@ export class FmgAssetServer {
 
   public constructor(private readonly assetRootPath: string) {}
 
-  public async start() {
+  /**
+   * FMG keeps its options in the page's localStorage, which belongs to the page's origin, port included. Reusing the
+   * port of the previous session keeps those options; a taken port falls back to a free one.
+   */
+  public async start(preferredPort: number | null): Promise<iFmgAssetServerAddress> {
     if (this.server || this.authority) throw new Error('The FMG asset server is already running.');
 
     const server = createServer((request, response) => {
@@ -23,6 +38,32 @@ export class FmgAssetServer {
       });
     });
 
+    try {
+      await this.listen(server, preferredPort ?? FMG_ASSET_SERVER_ANY_PORT);
+    } catch (error) {
+      if (preferredPort === null || !this.isPortInUseError(error)) throw error;
+      await this.listen(server, FMG_ASSET_SERVER_ANY_PORT);
+    }
+
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      await this.closeServer(server);
+      throw new Error('The FMG asset server did not receive a TCP address.');
+    }
+
+    this.server = server;
+    this.authority = `${FMG_ASSET_SERVER_HOST}:${address.port}`;
+    return { pageUrl: `http://${this.authority}/${FMG_ASSET_ENTRY_FILE}`, port: address.port };
+  }
+
+  public async stop() {
+    const server = this.server;
+    this.server = null;
+    this.authority = null;
+    if (server) await this.closeServer(server);
+  }
+
+  private async listen(server: Server, port: number) {
     await new Promise<void>((resolveStarted, rejectStarted) => {
       function onError(error: Error) {
         server.off('listening', onListening);
@@ -36,25 +77,12 @@ export class FmgAssetServer {
 
       server.once('error', onError);
       server.once('listening', onListening);
-      server.listen(0, FMG_ASSET_SERVER_HOST);
+      server.listen(port, FMG_ASSET_SERVER_HOST);
     });
-
-    const address = server.address();
-    if (!address || typeof address === 'string') {
-      await this.closeServer(server);
-      throw new Error('The FMG asset server did not receive a TCP address.');
-    }
-
-    this.server = server;
-    this.authority = `${FMG_ASSET_SERVER_HOST}:${address.port}`;
-    return `http://${this.authority}/${FMG_ASSET_ENTRY_FILE}`;
   }
 
-  public async stop() {
-    const server = this.server;
-    this.server = null;
-    this.authority = null;
-    if (server) await this.closeServer(server);
+  private isPortInUseError(error: unknown) {
+    return portInUseErrorSchema.safeParse(error).success;
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse) {

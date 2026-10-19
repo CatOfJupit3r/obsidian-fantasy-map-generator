@@ -20,7 +20,7 @@ describe('FMG asset server', () => {
     await writeFile(join(assetFolder, 'index.html'), '<script src="bundle.js"></script>');
     await writeFile(join(assetFolder, 'bundle.js'), 'globalThis.fmgLoaded = true;');
 
-    const pageUrl = await startAssetServer(assetFolder);
+    const { pageUrl } = await startAssetServer(assetFolder);
     const pageResponse = await fetch(pageUrl);
     const scriptResponse = await fetch(new URL('bundle.js', pageUrl));
 
@@ -39,11 +39,31 @@ describe('FMG asset server', () => {
     await mkdir(assetFolder);
     await writeFile(join(parentFolder, 'private.txt'), 'vault secret');
 
-    const pageUrl = await startAssetServer(assetFolder);
+    const { pageUrl } = await startAssetServer(assetFolder);
     const response = await fetch(new URL('/..%2Fprivate.txt', pageUrl));
 
     expect(response.status).toBe(404);
     await expect(response.text()).resolves.not.toContain('vault secret');
+  });
+
+  it('reuses the preferred port, so FMG keeps the storage of its origin across sessions', async () => {
+    const assetFolder = await createTemporaryAssetFolder();
+    const firstServer = await startAssetServer(assetFolder);
+    await assetServers.splice(0).at(0)?.stop();
+
+    const secondServer = await startAssetServer(assetFolder, firstServer.port);
+
+    expect(secondServer.port).toBe(firstServer.port);
+  });
+
+  it('falls back to a free port when the preferred one is taken', async () => {
+    const assetFolder = await createTemporaryAssetFolder();
+    const occupyingServer = await startAssetServer(assetFolder);
+
+    const fallbackServer = await startAssetServer(assetFolder, occupyingServer.port);
+
+    expect(fallbackServer.port).not.toBe(occupyingServer.port);
+    expect((await fetch(fallbackServer.pageUrl)).status).toBe(404);
   });
 
   async function createTemporaryAssetFolder() {
@@ -52,9 +72,9 @@ describe('FMG asset server', () => {
     return temporaryFolder;
   }
 
-  async function startAssetServer(assetFolder: string) {
+  async function startAssetServer(assetFolder: string, preferredPort: number | null = null) {
     const assetServer = new FmgAssetServer(assetFolder);
     assetServers.push(assetServer);
-    return assetServer.start();
+    return assetServer.start(preferredPort);
   }
 });

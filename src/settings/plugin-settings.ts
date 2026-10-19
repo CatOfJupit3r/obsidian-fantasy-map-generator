@@ -8,17 +8,21 @@ export interface iFmgPluginSettings {
   mapsFolder: string;
   /** The exports a save refreshes next to the `.map`. */
   exportKinds: MapExportKind[];
+  /** The loopback port FMG was served from last time; FMG's own options live in that origin's storage. */
+  fmgAssetServerPort: number | null;
 }
 
 export const DEFAULT_PLUGIN_SETTINGS: iFmgPluginSettings = {
   mapsFolder: 'Maps',
   exportKinds: DEFAULT_MAP_EXPORT_KINDS,
+  fmgAssetServerPort: null,
 };
 
 const storedSettingsSchema = z
   .object({
     mapsFolder: z.string().catch(DEFAULT_PLUGIN_SETTINGS.mapsFolder),
     exportKinds: z.array(z.unknown()).optional().catch(undefined),
+    fmgAssetServerPort: z.number().int().min(1).max(65_535).nullable().catch(DEFAULT_PLUGIN_SETTINGS.fmgAssetServerPort),
   })
   .partial();
 
@@ -32,6 +36,7 @@ export function readPluginSettings(stored: unknown): iFmgPluginSettings {
     exportKinds: settings.exportKinds
       ? [...new Set(settings.exportKinds.filter(isMapExportKind))]
       : DEFAULT_PLUGIN_SETTINGS.exportKinds,
+    fmgAssetServerPort: settings.fmgAssetServerPort ?? DEFAULT_PLUGIN_SETTINGS.fmgAssetServerPort,
   };
 }
 

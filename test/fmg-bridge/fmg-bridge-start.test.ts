@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BRIDGE_CHANNEL, BRIDGE_MESSAGE_KINDS, BRIDGE_PARENT_ORIGIN_PARAM } from '../../src/bridge/bridge-protocol';
+import { createFakeStorage } from '../utils/fake-storage';
 
 const PLUGIN_ORIGIN = 'app://obsidian.md';
 
@@ -12,8 +13,10 @@ function createFakePage(hash: string, hasParent: boolean) {
   const posted: { message: unknown; targetOrigin: string }[] = [];
   const parent = { postMessage: (message: unknown, targetOrigin: string) => posted.push({ message, targetOrigin }) };
 
+  const storage = createFakeStorage();
   const page: Record<string, unknown> = {
     location: { hash },
+    localStorage: storage,
     addEventListener: (type: string, listener: Listener) =>
       listeners.set(type, [...(listeners.get(type) ?? []), listener]),
     removeEventListener: vi.fn(),
@@ -25,7 +28,7 @@ function createFakePage(hash: string, hasParent: boolean) {
     for (const listener of listeners.get('keydown') ?? []) listener(event);
     return event;
   };
-  return { page, listeners, posted, press };
+  return { page, listeners, posted, press, storage };
 }
 
 const parentHash = `#${BRIDGE_PARENT_ORIGIN_PARAM}=${encodeURIComponent(PLUGIN_ORIGIN)}`;
@@ -76,6 +79,15 @@ describe('startBridge', () => {
     expect(posted[0]?.message).toMatchObject({ channel: BRIDGE_CHANNEL, kind: BRIDGE_MESSAGE_KINDS.SAVE_REQUESTED });
     expect(ctrl.preventDefault).toHaveBeenCalled();
     expect(cmd.stopImmediatePropagation).toHaveBeenCalled();
+  });
+
+  it('starts FMG with its autosave and save reminder off', async () => {
+    const { page, storage } = createFakePage(parentHash, true);
+    const startBridge = await loadStartBridge(page);
+    startBridge(page as unknown as Window);
+
+    const stored: unknown = JSON.parse(storage.getItem('fmg-options') ?? '');
+    expect(stored).toEqual({ app: { autosave: { interval: 0, remind: false } } });
   });
 
   it('leaves other keys to FMG', async () => {

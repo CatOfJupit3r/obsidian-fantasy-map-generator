@@ -24,10 +24,7 @@ export default class FmgPlugin extends Plugin {
 
     const settingsStore: iPluginSettingsStore = {
       read: () => this.settings,
-      update: async (change) => {
-        this.settings = { ...this.settings, ...change };
-        await this.saveData(this.settings);
-      },
+      update: async (change) => this.updateSettings(change),
     };
 
     this.registerView(
@@ -84,8 +81,15 @@ export default class FmgPlugin extends Plugin {
     if (!(await adapter.exists(normalizePath(`${fmgFolder}/${FMG_ASSET_ENTRY_FILE}`)))) return;
 
     const fmgAssetServer = new FmgAssetServer(adapter.getFullPath(fmgFolder));
-    this.fmgPageUrl = await fmgAssetServer.start();
+    const { pageUrl, port } = await fmgAssetServer.start(this.settings.fmgAssetServerPort);
+    this.fmgPageUrl = pageUrl;
     this.fmgAssetServer = fmgAssetServer;
+    if (port !== this.settings.fmgAssetServerPort) await this.updateSettings({ fmgAssetServerPort: port });
+  }
+
+  private async updateSettings(change: Partial<iFmgPluginSettings>) {
+    this.settings = { ...this.settings, ...change };
+    await this.saveData(this.settings);
   }
 
   private readFmgPageUrl(): string {

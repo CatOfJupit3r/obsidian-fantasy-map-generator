@@ -18,6 +18,7 @@ Copy `dist/` to `<vault>/.obsidian/plugins/azgaar-fantasy-map-generator/` and en
 
 - Open a `.map` file to edit it in FMG. "Save map" (the view's save icon or the command) and Ctrl/Cmd+S inside FMG write it back to the same vault file and refresh the enabled exports. FMG's own "Save to machine" is not used.
 - Unsaved edits are saved when the view closes. If the file changed on disk since it was opened (a sync or git, say), they are written to `<name> (unsaved changes).map` next to it instead, and a notice names the copy.
+- FMG's own autosave to browser storage and its "save to desktop" reminders are off: the vault file is where the map lives.
 - A save over a file that changed on disk asks whether to reload it or overwrite it. A change on disk with no unsaved edits in FMG reloads the map.
 - "New map" creates `Untitled map.map` (or `Untitled map 1.map`, ...) in the maps folder, creating the folder when missing, and saves the map FMG generates for it.
 - Settings: the maps folder, the exports to write on save, and the bundled FMG version.
@@ -41,7 +42,7 @@ A `.map` file is more than data: FMG runs part of it as code (the goods definiti
 
 FMG's page carries a Content-Security-Policy that limits where data can go: everything loads from the plugin's own files, except the Google font hosts (`fonts.googleapis.com`, `fonts.gstatic.com`) that FMG's exports read. FMG's online features (AI assistant, translation, emblem service) are blocked, and FMG runs in its desktop mode, with no service worker.
 
-While the plugin is loaded, it serves the bundled FMG files from an ephemeral HTTP server bound only to `127.0.0.1`. Obsidian blocks nested assets beneath a plugin `app://` URL, so the loopback server supplies the frame's scripts, styles, fonts and images without accepting connections from the local network; it stops when the plugin unloads.
+While the plugin is loaded, it serves the bundled FMG files from an HTTP server bound only to `127.0.0.1`. Obsidian blocks nested assets beneath a plugin `app://` URL, so the loopback server supplies the frame's scripts, styles, fonts and images without accepting connections from the local network; it stops when the plugin unloads. The plugin remembers the server's port and reuses it, because FMG keeps its own options (performance preset, layer presets and the like) in that origin's storage; when the port is taken it picks a free one, and FMG starts once with its default options.
 
 ## Licence
 

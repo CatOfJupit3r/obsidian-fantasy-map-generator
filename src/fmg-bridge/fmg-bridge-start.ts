@@ -8,7 +8,9 @@ import {
   exportMapRequestSchema,
   loadMapRequestSchema,
 } from '../bridge/bridge-protocol';
+import { hideFadedLoadingOverlay } from './fmg-loading-overlay';
 import { exportFmgMap, loadFmgMap, onFmgMapShown, serializeFmgMap } from './fmg-runtime';
+import { turnOffFmgAutosave } from './fmg-stored-options';
 
 /**
  * FMG's desktop build sets this from its Electron preload; FMG reads only `isElectron`. In desktop mode FMG sets no
@@ -67,6 +69,8 @@ export function startBridge(frameWindow: Window): BridgeHost | null {
   if (!parentOrigin || frameWindow.parent === frameWindow) return null;
 
   Object.assign(frameWindow, { electron: DESKTOP_BRIDGE });
+  turnOffFmgAutosave(frameWindow.localStorage);
+  frameWindow.addEventListener('DOMContentLoaded', () => hideFadedLoadingOverlay(frameWindow.document), { once: true });
   const host = new BridgeHost(createWindowChannel(frameWindow, frameWindow.parent, parentOrigin), handleRequest);
   forwardSaveShortcut(frameWindow, host);
   const stopWaiting = onFmgMapShown(() => {

@@ -7,3 +7,8 @@ export const HTTP_METHODS = {
   HEAD: 'HEAD',
 } as const;
 
+
+/** Lets the operating system pick a free port. */
+export const FMG_ASSET_SERVER_ANY_PORT = 0;
+
+export const PORT_IN_USE_ERROR_CODE = 'EADDRINUSE';
