@@ -1,0 +1,30 @@
+diff --git a/src/services/io/save.ts b/src/services/io/save.ts
+index cd96350..ffc9dd4 100644
+--- a/src/services/io/save.ts
++++ b/src/services/io/save.ts
+@@ -15,7 +15,11 @@ import { type SaveOutcome, saveToFileSystem } from "./save-to-file";
+ type Writer = () => Promise<void>;
+ 
+ const toStorage = (): Promise<void> => save(() => writeToStorage(prepareMapData(), true));
+-const toMachine = (saveAs = false): Promise<void> => save(() => writeToMachine(saveAs));
++const toMachine = (saveAs = false): Promise<void> => {
++  const hostSave = window.electron?.saveMap;
++  if (hostSave) return Promise.resolve(hostSave());
++  return save(() => writeToMachine(saveAs));
++};
+ const toDropbox = (): Promise<void> => save(() => writeToDropbox(prepareMapData(), `${getFileName()}.map`));
+ 
+ async function save(write: Writer): Promise<void> {
+diff --git a/src/services/platform.ts b/src/services/platform.ts
+index 6a2182c..ba08c9a 100644
+--- a/src/services/platform.ts
++++ b/src/services/platform.ts
+@@ -2,6 +2,8 @@ export type ElectronBridge = {
+   isElectron: true;
+   platform: string;
+   versions: { electron: string; chrome: string; node: string };
++  /** Set by a host that keeps the map file itself, such as the Obsidian plugin: "Save to machine" hands the save to it. */
++  saveMap?: () => void;
+ };
+ 
+ export const isElectron = (): boolean => Boolean(window.electron?.isElectron);
