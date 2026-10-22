@@ -15,10 +15,19 @@ import { exportFmgMap, loadFmgMap, onFmgMapShown, serializeFmgMap, showFmgRegion
 import { turnOffFmgAutosave } from './fmg-stored-options';
 
 /**
- * FMG's desktop build sets this from its Electron preload; FMG reads only `isElectron`. In desktop mode FMG sets no
- * "leave this page?" prompt, registers no service worker and hides its Dropbox and desktop-app offers.
+ * FMG's desktop build sets this from its Electron preload. In desktop mode FMG sets no "leave this page?" prompt,
+ * registers no service worker and hides its Dropbox and desktop-app offers. `saveMap` comes from the plugin's FMG patch
+ * (`scripts/fmg-patches/save-to-host.patch`): FMG's "Save to machine" calls it instead of opening a save-file picker,
+ * which a cross-origin frame may not open.
  */
-const DESKTOP_BRIDGE = { isElectron: true, platform: 'obsidian', versions: { electron: '', chrome: '', node: '' } };
+function createDesktopBridge(host: BridgeHost) {
+  return {
+    isElectron: true,
+    platform: 'obsidian',
+    versions: { electron: '', chrome: '', node: '' },
+    saveMap: () => host.notify(BRIDGE_EVENT_KINDS.SAVE_REQUESTED),
+  };
+}
 
 async function exportFiles(payload: unknown): Promise<iBridgeReply> {
   const files = [];
@@ -73,10 +82,10 @@ export function startBridge(frameWindow: Window): BridgeHost | null {
   const parentOrigin = readParentOrigin(frameWindow);
   if (!parentOrigin || frameWindow.parent === frameWindow) return null;
 
-  Object.assign(frameWindow, { electron: DESKTOP_BRIDGE });
+  const host = new BridgeHost(createWindowChannel(frameWindow, frameWindow.parent, parentOrigin), handleRequest);
+  Object.assign(frameWindow, { electron: createDesktopBridge(host) });
   turnOffFmgAutosave(frameWindow.localStorage);
   frameWindow.addEventListener('DOMContentLoaded', () => hideFadedLoadingOverlay(frameWindow.document), { once: true });
-  const host = new BridgeHost(createWindowChannel(frameWindow, frameWindow.parent, parentOrigin), handleRequest);
   forwardSaveShortcut(frameWindow, host);
   forwardEntityClicks(frameWindow, host);
   const stopWaiting = onFmgMapShown(() => {

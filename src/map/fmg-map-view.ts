@@ -5,7 +5,7 @@ import type { iMapEntityRef } from '../entities/map-entity.types';
 import { mountFmg } from '../fmg/fmg-adapter';
 import type { iMountedFmg } from '../fmg/fmg-adapter';
 import type { iMapBox } from '../map-data/map-geometry.types';
-import { showNotice } from '../show-notice';
+import { PERSISTENT_NOTICE_DURATION_MS, showNotice } from '../show-notice';
 import { askMapConflict, MAP_CONFLICT_CHOICES } from './map-conflict.modal';
 import type { MapExportKind } from './map-export.constants';
 import { MAP_FILE_EXTENSION } from './map-file-paths';
@@ -44,8 +44,20 @@ export class FmgMapView extends FileView {
 
   private isBusy = false;
 
+  /** Set while closing the tab waits for the save, so further close clicks do nothing meanwhile. */
+  private isClosingTab?: boolean;
+
+  /** Set once saving before closing failed and the tab stayed open: closing it again drops the unsaved edits. */
+  private shouldDiscardUnsavedEdits?: boolean;
+
+  /** The save before closing under way, which every close path running meanwhile waits for. */
+  private savingBeforeClose: Promise<unknown> | null = null;
+
   /** Settles once the file's map is open in FMG, or failed to open. */
   private opening: Promise<unknown> | null = null;
+
+  /** Set while FMG waits for the view to be shown; stops the wait. */
+  private stopWaitingUntilShown: (() => unknown) | null = null;
 
   public constructor(
     leaf: WorkspaceLeaf,
@@ -77,6 +89,7 @@ export class FmgMapView extends FileView {
         this.runInBackground(this.onFileModified(changed), `Could not process the change to ${changed.path}`);
       }),
     );
+    this.saveBeforeTabDetaches();
   }
 
   /** Returns at once; the map opens in the background, since FMG first starts and generates a map of its own. */
@@ -87,20 +100,21 @@ export class FmgMapView extends FileView {
       return;
     }
 
-    const mounted = mountFmg(this.contentEl, this.host.readFmgPageUrl());
-    this.mounted = mounted;
-    mounted.adapter.onSaveRequested(() => {
-      this.runInBackground(this.saveMap(), 'Could not save the map');
-    });
-    mounted.adapter.onEntityClicked((candidates) => {
-      this.runInBackground(this.host.openEntityNote(file.path, candidates), 'Could not open the linked note');
-    });
-    this.opening = this.openMap(mounted, file);
+    this.opening = this.mountAndOpenMap(file);
     this.runInBackground(this.opening, `Could not open ${file.path}`);
   }
 
   public async onUnloadFile(file: TFile) {
     await this.closeMap(file);
+  }
+
+  /**
+   * Obsidian removes FMG's frame along with the view's element before `onClose`, so unsaved edits are saved here. Only
+   * a view replaced within its tab waits for this; closing the tab is handled by `saveBeforeTabDetaches`.
+   */
+  public async close() {
+    if (this.file) await this.closeMap(this.file);
+    await super.close();
   }
 
   public async onClose() {
@@ -117,6 +131,7 @@ export class FmgMapView extends FileView {
     await this.runExclusively(async () => {
       const outcome = await session.save(file);
       if (outcome.kind === MAP_SAVE_OUTCOME_KIND_CASES.SAVED) {
+        this.shouldDiscardUnsavedEdits = false;
         showNotice(describeSave(outcome.report));
         return;
       }
@@ -130,6 +145,40 @@ export class FmgMapView extends FileView {
     const { mounted, session } = this;
     if (!mounted || !session) throw new Error('The map did not open in FMG.');
     await mounted.adapter.showRegion(box);
+  }
+
+  private async mountAndOpenMap(file: TFile) {
+    if (!(await this.waitUntilShown())) return;
+
+    const mounted = mountFmg(this.contentEl, this.host.readFmgPageUrl());
+    this.mounted = mounted;
+    mounted.adapter.onSaveRequested(() => {
+      this.runInBackground(this.saveMap(), 'Could not save the map');
+    });
+    mounted.adapter.onEntityClicked((candidates) => {
+      this.runInBackground(this.host.openEntityNote(file.path, candidates), 'Could not open the linked note');
+    });
+    await this.openMap(mounted, file);
+  }
+
+  /**
+   * FMG's frame only gets a window inside the document. Obsidian loads the views of a restored layout before it puts
+   * their tabs in the document, so FMG waits until the view is shown. Resolves to whether it was, rather than closed.
+   */
+  private async waitUntilShown() {
+    const { contentEl } = this;
+    if (contentEl.isConnected) return true;
+
+    return new Promise<boolean>((resolve) => {
+      const stopListening = contentEl.onNodeInserted(() => {
+        this.stopWaitingUntilShown = null;
+        resolve(true);
+      }, true);
+      this.stopWaitingUntilShown = () => {
+        stopListening();
+        resolve(false);
+      };
+    });
   }
 
   private async openMap(mounted: iMountedFmg, file: TFile) {
@@ -172,24 +221,83 @@ export class FmgMapView extends FileView {
     }, `Could not reload ${file.path}`);
   }
 
-  /** Saves unsaved edits before FMG goes away; when the file changed on disk, they go to a copy next to it. */
-  private async closeMap(file: TFile) {
-    const { session } = this;
-    this.session = null;
-    if (session && !this.isBusy) {
-      try {
-        await this.saveBeforeClosing(session, file);
-      } catch (error) {
-        showNotice(`Could not save ${file.path} before closing it: ${describeError(error)}`);
-      }
+  /**
+   * `WorkspaceLeaf.detach` closes the view without waiting and removes the tab's DOM, and FMG's frame with it, right
+   * after. The leaf's `detach` is wrapped so it first saves while FMG still runs; a failed save keeps the tab open.
+   */
+  private saveBeforeTabDetaches() {
+    const { leaf } = this;
+    const detachLeaf = leaf.detach.bind(leaf);
+    leaf.detach = () => {
+      this.runInBackground(this.detachTabAfterSaving(detachLeaf), 'Could not close the map');
+    };
+    this.register(() => {
+      leaf.detach = detachLeaf;
+    });
+  }
+
+  private async detachTabAfterSaving(detachLeaf: () => unknown) {
+    const { file } = this;
+    if (this.isClosingTab || !file) return;
+
+    this.isClosingTab = true;
+    try {
+      await this.saveBeforeClosing(file);
+    } catch (error) {
+      this.shouldDiscardUnsavedEdits = true;
+      this.reportCloseFailure(file, error, 'The map stays open; close it again to discard the unsaved edits.');
+      return;
+    } finally {
+      this.isClosingTab = false;
     }
+    detachLeaf();
+  }
+
+  private async closeMap(file: TFile) {
+    try {
+      await this.saveBeforeClosing(file);
+    } catch (error) {
+      this.reportCloseFailure(file, error, 'Any edits since the last save are lost.');
+    }
+    this.session = null;
+    this.shouldDiscardUnsavedEdits = false;
+    this.stopWaitingUntilShown?.();
+    this.stopWaitingUntilShown = null;
     this.mounted?.adapter.dispose();
     this.mounted?.frame.remove();
     this.mounted = null;
     this.opening = null;
   }
 
-  private async saveBeforeClosing(session: MapSession, file: TFile) {
+  /**
+   * Obsidian may run several close paths at once, for example when the plugin unloads; they all wait for the one save
+   * under way instead of failing as busy and disposing FMG beneath it.
+   */
+  private async saveBeforeClosing(file: TFile) {
+    this.savingBeforeClose ??= this.saveSessionBeforeClosing(file).finally(() => {
+      this.savingBeforeClose = null;
+    });
+    await this.savingBeforeClose;
+  }
+
+  /** Saves unsaved edits while FMG still runs, and forgets the session once nothing is left unsaved. */
+  private async saveSessionBeforeClosing(file: TFile) {
+    const { session, mounted } = this;
+    if (!session || this.shouldDiscardUnsavedEdits) return;
+    if (this.isBusy) throw new Error('The map is busy saving or loading.');
+    if (!mounted?.frame.isConnected) throw new Error('FMG was closed before its map could be read.');
+
+    this.isBusy = true;
+    try {
+      await this.writeUnsavedEdits(session, file);
+    } finally {
+      this.isBusy = false;
+    }
+    this.session = null;
+  }
+
+  /** When the file changed on disk, the edits go to a copy next to it. */
+  private async writeUnsavedEdits(session: MapSession, file: TFile) {
     if (!(await session.hasUnsavedChanges())) return;
 
     const outcome = await session.save(file);
@@ -199,6 +307,15 @@ export class FmgMapView extends FileView {
     }
     const copyPath = await session.saveCopy(file);
     showNotice(`${file.path} changed on disk, so the unsaved edits went to ${copyPath}.`);
+  }
+
+  /** Unsaved edits are at stake, so the notice stays until dismissed and the console keeps the error with its stack. */
+  private reportCloseFailure(file: TFile, error: unknown, consequence: string) {
+    console.error(`Could not save ${file.path} before closing it.`, error);
+    showNotice(
+      `Could not save ${file.path} before closing it: ${describeError(error)} ${consequence}`,
+      PERSISTENT_NOTICE_DURATION_MS,
+    );
   }
 
   private async runExclusively(run: () => Promise<unknown>, failurePrefix: string) {

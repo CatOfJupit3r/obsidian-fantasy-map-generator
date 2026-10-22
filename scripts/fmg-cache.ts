@@ -2,12 +2,15 @@ import { access, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import { FMG_PIN } from '../src/fmg/fmg-pin';
+import { FMG_PATCHES } from './fmg-patches.constants';
 import { run } from './fmg-run';
+
+const FMG_PATCHES_DIR = path.join(import.meta.dirname, 'fmg-patches');
 
 export interface iFmgCache {
   /** The checkout of the pinned tag. */
   sourceDir: string;
-  /** FMG's own renderer build, with a relative base. */
+  /** FMG's own renderer build of the patched source, with a relative base. */
   buildDir: string;
 }
 
@@ -23,7 +26,7 @@ async function exists(filePath: string): Promise<boolean> {
 function readCachePaths(cacheDir: string): iFmgCache {
   return {
     sourceDir: path.join(cacheDir, FMG_PIN.tag),
-    buildDir: path.join(cacheDir, `build-${FMG_PIN.commit}`),
+    buildDir: path.join(cacheDir, `build-${FMG_PIN.commit}-patches-${FMG_PATCHES.revision}`),
   };
 }
 
@@ -57,11 +60,21 @@ async function ensureSource(cacheDir: string, sourceDir: string) {
   }
 }
 
-/** Fetches the pinned FMG and builds it with its own build (its desktop mode), unless the cache already holds it. */
+/** Puts the checkout back to the pinned commit, then applies the plugin's patches to it. */
+async function applyPatches(sourceDir: string) {
+  await run('git', ['reset', '--hard', FMG_PIN.commit], { cwd: sourceDir });
+  for (const fileName of FMG_PATCHES.fileNames) {
+    await run('git', ['apply', path.join(FMG_PATCHES_DIR, fileName)], { cwd: sourceDir });
+  }
+}
+
+/** Fetches the pinned FMG and builds it, patched, with its own build (its desktop mode), unless the cache holds it. */
 export async function fetchAndBuildFmg(cacheDir: string): Promise<iFmgCache> {
   const cache = readCachePaths(cacheDir);
   await ensureSource(cacheDir, cache.sourceDir);
   if (await exists(path.join(cache.buildDir, 'index.html'))) return cache;
+
+  await applyPatches(cache.sourceDir);
 
   // Dev dependencies hold the bundler, so only the build itself runs as production.
   await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: cache.sourceDir });

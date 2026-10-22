@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { BRIDGE_CHANNEL, BRIDGE_MESSAGE_KINDS, BRIDGE_PARENT_ORIGIN_PARAM } from '../../src/bridge/bridge-protocol';
 import { createFakeStorage } from '../utils/fake-storage';
@@ -31,7 +32,12 @@ function createFakePage(hash: string, hasParent: boolean) {
   return { page, listeners, posted, press, storage };
 }
 
-const parentHash = `#${BRIDGE_PARENT_ORIGIN_PARAM}=${encodeURIComponent(PLUGIN_ORIGIN)}`;
+const desktopBridgeSchema = z.object({
+  isElectron: z.literal(true),
+  saveMap: z.custom<() => unknown>((value) => typeof value === 'function'),
+});
+
+const parentHash =`#${BRIDGE_PARENT_ORIGIN_PARAM}=${encodeURIComponent(PLUGIN_ORIGIN)}`;
 
 /** The module reads `window` when it loads, so it is imported once the fake page stands in for it. */
 async function loadStartBridge(page: object) {
@@ -79,6 +85,18 @@ describe('startBridge', () => {
     expect(posted[0]?.message).toMatchObject({ channel: BRIDGE_CHANNEL, kind: BRIDGE_MESSAGE_KINDS.SAVE_REQUESTED });
     expect(ctrl.preventDefault).toHaveBeenCalled();
     expect(cmd.stopImmediatePropagation).toHaveBeenCalled();
+  });
+
+  it('gives FMG a saveMap hook, which its patched "Save to machine" calls, that tells the plugin to save', async () => {
+    const { page, posted } = createFakePage(parentHash, true);
+    const startBridge = await loadStartBridge(page);
+    startBridge(page as unknown as Window);
+
+    desktopBridgeSchema.parse(page.electron).saveMap();
+
+    expect(posted.map(({ message }) => message)).toEqual([
+      expect.objectContaining({ channel: BRIDGE_CHANNEL, kind: BRIDGE_MESSAGE_KINDS.SAVE_REQUESTED }),
+    ]);
   });
 
   it('starts FMG with its autosave and save reminder off', async () => {
