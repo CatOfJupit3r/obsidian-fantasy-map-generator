@@ -56,6 +56,9 @@ export class FmgMapView extends FileView {
   /** Settles once the file's map is open in FMG, or failed to open. */
   private opening: Promise<unknown> | null = null;
 
+  /** Set while FMG waits for the view to be shown; stops the wait. */
+  private stopWaitingUntilShown: (() => unknown) | null = null;
+
   public constructor(
     leaf: WorkspaceLeaf,
     private readonly host: iFmgMapViewHost,
@@ -97,15 +100,7 @@ export class FmgMapView extends FileView {
       return;
     }
 
-    const mounted = mountFmg(this.contentEl, this.host.readFmgPageUrl());
-    this.mounted = mounted;
-    mounted.adapter.onSaveRequested(() => {
-      this.runInBackground(this.saveMap(), 'Could not save the map');
-    });
-    mounted.adapter.onEntityClicked((candidates) => {
-      this.runInBackground(this.host.openEntityNote(file.path, candidates), 'Could not open the linked note');
-    });
-    this.opening = this.openMap(mounted, file);
+    this.opening = this.mountAndOpenMap(file);
     this.runInBackground(this.opening, `Could not open ${file.path}`);
   }
 
@@ -150,6 +145,40 @@ export class FmgMapView extends FileView {
     const { mounted, session } = this;
     if (!mounted || !session) throw new Error('The map did not open in FMG.');
     await mounted.adapter.showRegion(box);
+  }
+
+  private async mountAndOpenMap(file: TFile) {
+    if (!(await this.waitUntilShown())) return;
+
+    const mounted = mountFmg(this.contentEl, this.host.readFmgPageUrl());
+    this.mounted = mounted;
+    mounted.adapter.onSaveRequested(() => {
+      this.runInBackground(this.saveMap(), 'Could not save the map');
+    });
+    mounted.adapter.onEntityClicked((candidates) => {
+      this.runInBackground(this.host.openEntityNote(file.path, candidates), 'Could not open the linked note');
+    });
+    await this.openMap(mounted, file);
+  }
+
+  /**
+   * FMG's frame only gets a window inside the document. Obsidian loads the views of a restored layout before it puts
+   * their tabs in the document, so FMG waits until the view is shown. Resolves to whether it was, rather than closed.
+   */
+  private async waitUntilShown() {
+    const { contentEl } = this;
+    if (contentEl.isConnected) return true;
+
+    return new Promise<boolean>((resolve) => {
+      const stopListening = contentEl.onNodeInserted(() => {
+        this.stopWaitingUntilShown = null;
+        resolve(true);
+      }, true);
+      this.stopWaitingUntilShown = () => {
+        stopListening();
+        resolve(false);
+      };
+    });
   }
 
   private async openMap(mounted: iMountedFmg, file: TFile) {
@@ -232,6 +261,8 @@ export class FmgMapView extends FileView {
     }
     this.session = null;
     this.shouldDiscardUnsavedEdits = false;
+    this.stopWaitingUntilShown?.();
+    this.stopWaitingUntilShown = null;
     this.mounted?.adapter.dispose();
     this.mounted?.frame.remove();
     this.mounted = null;
